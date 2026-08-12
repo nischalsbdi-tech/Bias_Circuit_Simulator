@@ -1,0 +1,12 @@
+#ifndef COMPONENT_TYPE_HPP
+#define COMPONENT_TYPE_HPP
+
+using namespace std;
+
+enum class ComponentType {
+    RESISTOR, CAPACITOR, INDUCTOR, VOLTAGE_SOURCE,
+    GROUND, LED, AMMETER, AND_GATE, OR_GATE,
+    NOT_GATE, NAND_GATE, NOR_GATE, XOR_GATE, XNOR_GATE
+};
+
+#endif
