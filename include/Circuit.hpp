@@ -101,6 +101,31 @@ public:
             DrawTriangle(Vector2{ comp.pos.x - 10, comp.pos.y - 12 }, Vector2{ comp.pos.x - 10, comp.pos.y + 12 }, Vector2{ comp.pos.x + 10, comp.pos.y }, isLit ? RED : DARKGRAY);
             DrawLineEx(Vector2{ comp.pos.x + 10, comp.pos.y - 12 }, Vector2{ comp.pos.x + 10, comp.pos.y + 12 }, 3, isLit ? RED : bodyColor);
             DrawText("LED", static_cast<int>(comp.pos.x - 10), static_cast<int>(comp.pos.y + 16), 10, RED);
+        } else if (comp.type == ComponentType::SWITCH) {
+            Vector2 pivot = Vector2{ comp.pos.x - 15, comp.pos.y };
+            Vector2 contact = Vector2{ comp.pos.x + 15, comp.pos.y };
+            DrawLineEx(tA.pos, pivot, 2, DARKGRAY);
+            DrawLineEx(contact, tB.pos, 2, DARKGRAY);
+            DrawCircleV(pivot, 3, bodyColor);
+            DrawCircleV(contact, 3, bodyColor);
+            if (comp.switchOn) {
+                DrawLineEx(pivot, contact, 3, DARKGREEN);
+            } else {
+                Vector2 leverEnd = Vector2{ comp.pos.x + 12, comp.pos.y - 16 };
+                DrawLineEx(pivot, leverEnd, 3, MAROON);
+            }
+            DrawText(comp.switchOn ? "CLOSED" : "OPEN", static_cast<int>(comp.pos.x - 22), static_cast<int>(comp.pos.y + 16), 11, comp.switchOn ? DARKGREEN : MAROON);
+        } else if (comp.type == ComponentType::TWO_WAY_SWITCH) {
+            Terminal tC = comp.getTerminalC();
+            Vector2 pivot = Vector2{ comp.pos.x - 15, comp.pos.y };
+            DrawLineEx(tA.pos, pivot, 2, DARKGRAY);
+            DrawLineEx(pivot, tB.pos, 1, LIGHTGRAY);
+            DrawLineEx(pivot, tC.pos, 1, LIGHTGRAY);
+            Vector2 activeContact = comp.switchPos ? tC.pos : tB.pos;
+            DrawLineEx(pivot, activeContact, 3, DARKGREEN);
+            DrawCircleV(pivot, 3, bodyColor);
+            DrawCircleV(tC.pos, 4, BLUE);
+            DrawText(comp.switchPos ? "POS: B" : "POS: A", static_cast<int>(comp.pos.x - 20), static_cast<int>(comp.pos.y + 22), 11, DARKGREEN);
         } else if (comp.type == ComponentType::AMMETER) {
             DrawLineEx(tA.pos, Vector2{ comp.pos.x - 18, comp.pos.y }, 2, DARKGRAY);
             DrawLineEx(Vector2{ comp.pos.x + 18, comp.pos.y }, tB.pos, 2, DARKGRAY);
@@ -113,7 +138,7 @@ public:
             DrawText(ss.str().c_str(), static_cast<int>(comp.pos.x - 20), static_cast<int>(comp.pos.y + 22), 11, PURPLE);
         }
 
-        if (abs(comp.current) > 1e-4 && comp.type != ComponentType::GROUND && !comp.isLogicGate()) {
+        if (abs(comp.current) > 1e-4 && comp.type != ComponentType::GROUND && !comp.isLogicGate() && comp.type != ComponentType::TWO_WAY_SWITCH) {
             Vector2 pPos = Vector2{ tA.pos.x + (tB.pos.x - tA.pos.x) * comp.particleProgress,
                                    tA.pos.y + (tB.pos.y - tA.pos.y) * comp.particleProgress };
             DrawCircleV(pPos, 4, YELLOW);
@@ -139,7 +164,7 @@ public:
             } else {
                 ds.find(makePointKey(comp->getTerminalA().pos));
                 if (comp->type != ComponentType::NOT_GATE) ds.find(makePointKey(comp->getTerminalB().pos));
-                if (comp->isLogicGate()) ds.find(makePointKey(comp->getTerminalC().pos));
+                if (comp->isLogicGate() || comp->type == ComponentType::TWO_WAY_SWITCH) ds.find(makePointKey(comp->getTerminalC().pos));
             }
         }
 
@@ -189,6 +214,7 @@ public:
             else if (comp->type == ComponentType::CAPACITOR) { G = comp->value / max(dt, 1e-6); reqCurrent = G * comp->vPrev; }
             else if (comp->type == ComponentType::INDUCTOR) { G = dt / max(comp->value, 1e-6); reqCurrent = -comp->iPrev; }
             else if (comp->type == ComponentType::AMMETER) G = 1.0 / 0.0001;
+            else if (comp->type == ComponentType::SWITCH) G = comp->switchOn ? (1.0 / 0.0001) : 1e-9;
             else if (comp->type == ComponentType::LED) {
                 double vDiff = nodeVoltages[nA] - nodeVoltages[nB];
                 if (vDiff > 1.8) { G = 1.0 / 20.0; reqCurrent = G * 1.8; }
@@ -197,10 +223,22 @@ public:
 
             if (comp->type == ComponentType::RESISTOR || comp->type == ComponentType::CAPACITOR ||
                 comp->type == ComponentType::INDUCTOR || comp->type == ComponentType::AMMETER ||
-                comp->type == ComponentType::LED) {
+                comp->type == ComponentType::SWITCH || comp->type == ComponentType::LED) {
                 if (nA > 0) { A[nA - 1][nA - 1] += G; z[nA - 1] += reqCurrent; }
                 if (nB > 0) { A[nB - 1][nB - 1] += G; z[nB - 1] -= reqCurrent; }
                 if (nA > 0 && nB > 0) { A[nA - 1][nB - 1] -= G; A[nB - 1][nA - 1] -= G; }
+            }
+            else if (comp->type == ComponentType::TWO_WAY_SWITCH) {
+                int nC = pointToNodeMap[makePointKey(comp->getTerminalC().pos)];
+                double Gon = 1.0 / 0.0001;
+                double Goff = 1e-9;
+                double G_AB = comp->switchPos ? Goff : Gon;
+                double G_AC = comp->switchPos ? Gon : Goff;
+                if (nA > 0) A[nA - 1][nA - 1] += G_AB + G_AC;
+                if (nB > 0) A[nB - 1][nB - 1] += G_AB;
+                if (nC > 0) A[nC - 1][nC - 1] += G_AC;
+                if (nA > 0 && nB > 0) { A[nA - 1][nB - 1] -= G_AB; A[nB - 1][nA - 1] -= G_AB; }
+                if (nA > 0 && nC > 0) { A[nA - 1][nC - 1] -= G_AC; A[nC - 1][nA - 1] -= G_AC; }
             }
             else if (comp->isLogicGate()) {
                 int nC = pointToNodeMap[makePointKey(comp->getTerminalC().pos)];
@@ -245,6 +283,13 @@ public:
             if (comp->type == ComponentType::RESISTOR || comp->type == ComponentType::AMMETER) {
                 double R = (comp->type == ComponentType::AMMETER) ? 0.0001 : comp->value;
                 comp->current = (vA - vB) / R;
+            } else if (comp->type == ComponentType::SWITCH) {
+                double R = comp->switchOn ? 0.0001 : 1e9;
+                comp->current = (vA - vB) / R;
+            } else if (comp->type == ComponentType::TWO_WAY_SWITCH) {
+                int nC = pointToNodeMap[makePointKey(comp->getTerminalC().pos)];
+                double vC = nodeVoltages[nC];
+                comp->current = comp->switchPos ? (vA - vC) / 0.0001 : (vA - vB) / 0.0001;
             } else if (comp->type == ComponentType::LED) {
                 double vDiff = vA - vB;
                 comp->current = (vDiff > 1.8) ? (vDiff - 1.8) / 20.0 : 0.0;

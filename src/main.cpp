@@ -5,9 +5,51 @@ using namespace std;
 
 enum class ToolMode {
     SELECT, RESISTOR, CAPACITOR, INDUCTOR, VOLTAGE_SOURCE,
-    LED, AMMETER, AND_GATE, OR_GATE, NOT_GATE, NAND_GATE,
+    LED, AMMETER, SWITCH, TWO_WAY_SWITCH, AND_GATE, OR_GATE, NOT_GATE, NAND_GATE,
     NOR_GATE, XOR_GATE, XNOR_GATE, GROUND, WIRE, PROBE
 };
+
+bool isEditableValueType(ComponentType t) {
+    return t == ComponentType::RESISTOR || t == ComponentType::CAPACITOR ||
+           t == ComponentType::INDUCTOR || t == ComponentType::VOLTAGE_SOURCE;
+}
+
+string editUnitSuffix(ComponentType t) {
+    switch (t) {
+        case ComponentType::RESISTOR: return "Ohm";
+        case ComponentType::CAPACITOR: return "uF";
+        case ComponentType::INDUCTOR: return "mH";
+        case ComponentType::VOLTAGE_SOURCE: return "V";
+        default: return "";
+    }
+}
+
+// Converts the component's internal value into the friendly unit shown/edited in the UI.
+string valueToEditString(const shared_ptr<Component>& c) {
+    double v = c->value;
+    if (c->type == ComponentType::CAPACITOR) v = c->value * 1e6;
+    else if (c->type == ComponentType::INDUCTOR) v = c->value * 1e3;
+    ostringstream ss;
+    ss << v;
+    return ss.str();
+}
+
+// Parses the edit buffer (in the friendly unit) and, if valid, applies it live to the component.
+void applyEditBuffer(const shared_ptr<Component>& c, const string& buf) {
+    if (!c || buf.empty() || buf == "-" || buf == ".") return;
+    try {
+        size_t consumed = 0;
+        double v = stod(buf, &consumed);
+        if (consumed == 0) return;
+        switch (c->type) {
+            case ComponentType::RESISTOR:       c->value = max(v, 0.01); break;
+            case ComponentType::CAPACITOR:      c->value = max(v, 0.001) * 1e-6; break;
+            case ComponentType::INDUCTOR:       c->value = max(v, 0.001) * 1e-3; break;
+            case ComponentType::VOLTAGE_SOURCE:  c->value = v; break;
+            default: break;
+        }
+    } catch (...) {}
+}
 
 Vector2 snapVector(Vector2 v, float gridStep = 20.0f) {
     return Vector2{
@@ -66,8 +108,20 @@ int main() {
     bool isDragging = false, isWiring = false;
     Vector2 wireStartPos = { 0, 0 };
 
+    // Switch click-to-toggle tracking (a click that doesn't drag toggles the switch)
+    bool pressedOnSwitch = false;
+    Vector2 pressPos = { 0, 0 };
+
+    // Value editing state
+    bool isEditingValue = false;
+    string editBuffer = "";
+
     while (!WindowShouldClose()) {
         Vector2 mousePos = GetMousePosition();
+
+        if (isEditingValue && (!selectedComp || !isEditableValueType(selectedComp->type))) {
+            isEditingValue = false;
+        }
 
         if (circuit.isRunning) {
             for (int i = 0; i < 5; ++i) circuit.stepSimulation(0.001);
@@ -75,7 +129,7 @@ int main() {
             circuit.stepSimulation(0.0);
         }
 
-        if (mousePos.x > 240) {
+        if (!isEditingValue && mousePos.x > 240) {
             if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
                 Vector2 snapped = snapVector(mousePos);
 
@@ -85,6 +139,8 @@ int main() {
                 else if (currentTool == ToolMode::VOLTAGE_SOURCE) circuit.components.push_back(make_shared<Component>(ComponentType::VOLTAGE_SOURCE, snapped, 5.0));
                 else if (currentTool == ToolMode::LED) circuit.components.push_back(make_shared<Component>(ComponentType::LED, snapped, 0.0));
                 else if (currentTool == ToolMode::AMMETER) circuit.components.push_back(make_shared<Component>(ComponentType::AMMETER, snapped, 0.0));
+                else if (currentTool == ToolMode::SWITCH) circuit.components.push_back(make_shared<Component>(ComponentType::SWITCH, snapped, 0.0));
+                else if (currentTool == ToolMode::TWO_WAY_SWITCH) circuit.components.push_back(make_shared<Component>(ComponentType::TWO_WAY_SWITCH, snapped, 0.0));
                 else if (currentTool == ToolMode::AND_GATE) circuit.components.push_back(make_shared<Component>(ComponentType::AND_GATE, snapped, 0.0));
                 else if (currentTool == ToolMode::OR_GATE) circuit.components.push_back(make_shared<Component>(ComponentType::OR_GATE, snapped, 0.0));
                 else if (currentTool == ToolMode::NOT_GATE) circuit.components.push_back(make_shared<Component>(ComponentType::NOT_GATE, snapped, 0.0));
@@ -118,6 +174,8 @@ int main() {
                             selectedComp = c; 
                             c->selected = true; 
                             isDragging = true; 
+                            pressPos = mousePos;
+                            pressedOnSwitch = c->isSwitch();
                             break;
                         }
                     }
@@ -169,10 +227,22 @@ int main() {
                 }
             }
         }
-        if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) isDragging = false;
+        if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+            // A click (press+release with little movement) on a switch toggles it;
+            // a click-and-drag instead moves it, like every other component.
+            if (pressedOnSwitch && selectedComp) {
+                float dx = mousePos.x - pressPos.x, dy = mousePos.y - pressPos.y;
+                if ((dx * dx + dy * dy) < 36.0f) {
+                    if (selectedComp->type == ComponentType::SWITCH) selectedComp->switchOn = !selectedComp->switchOn;
+                    else if (selectedComp->type == ComponentType::TWO_WAY_SWITCH) selectedComp->switchPos = !selectedComp->switchPos;
+                }
+            }
+            isDragging = false;
+            pressedOnSwitch = false;
+        }
 
-        // Delete component OR selected wire
-        if (IsKeyPressed(KEY_DELETE) || IsKeyPressed(KEY_BACKSPACE)) {
+        // Delete component OR selected wire (disabled while typing a value)
+        if (!isEditingValue && (IsKeyPressed(KEY_DELETE) || IsKeyPressed(KEY_BACKSPACE))) {
             if (selectedComp) {
                 circuit.components.erase(remove(circuit.components.begin(), circuit.components.end(), selectedComp), circuit.components.end());
                 selectedComp = nullptr;
@@ -217,7 +287,7 @@ int main() {
         DrawText("LOGIC & ANALOG LAB", 15, 12, 16, RAYWHITE);
 
         int yPos = 38;
-        #define BTN(lbl, mode) if (DrawButton(Rectangle{ 15, (float)yPos, 210, 22 }, lbl, currentTool == mode)) { currentTool = mode; selectedWireIdx = -1; } yPos += 25;
+        #define BTN(lbl, mode) if (DrawButton(Rectangle{ 15, (float)yPos, 210, 22 }, lbl, currentTool == mode)) { currentTool = mode; selectedWireIdx = -1; isEditingValue = false; } yPos += 25;
         BTN("SELECT / DRAG", ToolMode::SELECT);
         BTN("+ RESISTOR", ToolMode::RESISTOR);
         BTN("+ CAPACITOR", ToolMode::CAPACITOR);
@@ -225,6 +295,8 @@ int main() {
         BTN("+ VOLTAGE SRC (5V)", ToolMode::VOLTAGE_SOURCE);
         BTN("+ LED", ToolMode::LED);
         BTN("+ AMMETER", ToolMode::AMMETER);
+        BTN("+ SWITCH", ToolMode::SWITCH);
+        BTN("+ TWO-WAY SWITCH", ToolMode::TWO_WAY_SWITCH);
         BTN("+ AND GATE", ToolMode::AND_GATE);
         BTN("+ OR GATE", ToolMode::OR_GATE);
         BTN("+ NOT GATE", ToolMode::NOT_GATE);
@@ -246,7 +318,64 @@ int main() {
         } yPos += 35;
 
         if (DrawButton(Rectangle{ 15, (float)yPos, 210, 24 }, "CLEAR ALL", false, MAROON)) {
-            circuit.clear(); selectedComp = nullptr; selectedWireIdx = -1;
+            circuit.clear(); selectedComp = nullptr; selectedWireIdx = -1; isEditingValue = false;
+        }
+        yPos += 34;
+
+        // Edit-value panel: only shows up for components with an editable value
+        // (resistor, capacitor, inductor, voltage source). Switches/gates/etc. skip it.
+        bool editableSelected = selectedComp && isEditableValueType(selectedComp->type);
+        if (editableSelected) {
+            DrawLine(15, yPos, 225, yPos, GRAY); yPos += 10;
+
+            const char* editLabel = isEditingValue ? "CONFIRM (ENTER)" : "EDIT VALUE";
+            if (DrawButton(Rectangle{ 15, (float)yPos, 210, 26 }, editLabel, isEditingValue, SKYBLUE)) {
+                if (!isEditingValue) {
+                    isEditingValue = true;
+                    editBuffer = valueToEditString(selectedComp);
+                } else {
+                    applyEditBuffer(selectedComp, editBuffer);
+                    isEditingValue = false;
+                }
+            }
+            yPos += 30;
+
+            if (isEditingValue) {
+                // Capture typed characters
+                int key = GetCharPressed();
+                while (key > 0) {
+                    bool isDigit = (key >= '0' && key <= '9');
+                    bool isDot = (key == '.' && editBuffer.find('.') == string::npos);
+                    bool isMinus = (key == '-' && editBuffer.empty() && selectedComp->type == ComponentType::VOLTAGE_SOURCE);
+                    if ((isDigit || isDot || isMinus) && editBuffer.size() < 10) editBuffer += static_cast<char>(key);
+                    key = GetCharPressed();
+                }
+                if (IsKeyPressed(KEY_BACKSPACE) && !editBuffer.empty()) editBuffer.pop_back();
+                if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_KP_ENTER)) {
+                    applyEditBuffer(selectedComp, editBuffer);
+                    isEditingValue = false;
+                }
+                if (IsKeyPressed(KEY_ESCAPE)) isEditingValue = false;
+
+                // Apply live so the component updates on the canvas as you type
+                applyEditBuffer(selectedComp, editBuffer);
+
+                Rectangle box{ 15, (float)yPos, 210, 28 };
+                DrawRectangleRec(box, RAYWHITE);
+                DrawRectangleLinesEx(box, 2, BLUE);
+                bool cursorOn = (static_cast<int>(GetTime() * 2.0) % 2) == 0;
+                string display = editBuffer + (cursorOn ? "_" : "");
+                DrawText(display.c_str(), static_cast<int>(box.x + 8), static_cast<int>(box.y + 7), 14, BLACK);
+                string unit = editUnitSuffix(selectedComp->type);
+                int uw = MeasureText(unit.c_str(), 12);
+                DrawText(unit.c_str(), static_cast<int>(box.x + box.width - uw - 8), static_cast<int>(box.y + 9), 12, DARKGRAY);
+                yPos += 32;
+            } else {
+                stringstream ss;
+                ss << "Value: " << valueToEditString(selectedComp) << " " << editUnitSuffix(selectedComp->type);
+                DrawText(ss.str().c_str(), 15, yPos, 12, RAYWHITE);
+                yPos += 18;
+            }
         }
 
         EndDrawing();
