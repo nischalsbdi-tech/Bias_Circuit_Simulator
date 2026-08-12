@@ -36,28 +36,28 @@ public:
     }
 
     virtual Rectangle getBounds() const {
-        if (isLogicGate()) return Rectangle{ pos.x - 30, pos.y - 20, 60, 40 };
+        if (isLogicGate()) return Rectangle{ pos.x - 40, pos.y - 20, 60, 40 };
         return isHorizontal ? Rectangle{ pos.x - 40, pos.y - 20, 80, 40 }
                             : Rectangle{ pos.x - 20, pos.y - 40, 40, 80 };
     }
 
     virtual Terminal getTerminalA() const {
         if (type == ComponentType::GROUND) return Terminal{ Vector2{ pos.x, pos.y - 20 }, -1 };
-        if (type == ComponentType::NOT_GATE) return Terminal{ Vector2{ pos.x - 30, pos.y }, -1 };
-        if (isLogicGate()) return Terminal{ Vector2{ pos.x - 30, pos.y - 10 }, -1 };
+        if (type == ComponentType::NOT_GATE) return Terminal{ Vector2{ pos.x - 40, pos.y }, -1 };
+        if (isLogicGate()) return Terminal{ Vector2{ pos.x - 40, pos.y - 20 }, -1 };
         return isHorizontal ? Terminal{ Vector2{ pos.x - 40, pos.y }, -1 }
                             : Terminal{ Vector2{ pos.x, pos.y - 40 }, -1 };
     }
 
     virtual Terminal getTerminalB() const {
         if (type == ComponentType::GROUND || type == ComponentType::NOT_GATE) return Terminal{ pos, -1 };
-        if (isLogicGate()) return Terminal{ Vector2{ pos.x - 30, pos.y + 10 }, -1 };
+        if (isLogicGate()) return Terminal{ Vector2{ pos.x - 40, pos.y + 20 }, -1 };
         return isHorizontal ? Terminal{ Vector2{ pos.x + 40, pos.y }, -1 }
                             : Terminal{ Vector2{ pos.x, pos.y + 40 }, -1 };
     }
 
     virtual Terminal getTerminalC() const {
-        if (isLogicGate()) return Terminal{ Vector2{ pos.x + 30, pos.y }, -1 };
+        if (isLogicGate()) return Terminal{ Vector2{ pos.x + 40, pos.y }, -1 };
         return Terminal{ Vector2{ 0, 0 }, -1 };
     }
 

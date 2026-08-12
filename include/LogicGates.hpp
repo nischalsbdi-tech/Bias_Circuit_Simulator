@@ -45,11 +45,11 @@ inline void drawLogicGate(const Component& gate) {
     if (gate.type == ComponentType::NOT_GATE) {
         DrawLineEx(tA.pos, Vector2{ gate.pos.x - 20, gate.pos.y }, 2, DARKGRAY);
     } else {
-        DrawLineEx(tA.pos, Vector2{ gate.pos.x - 20, gate.pos.y - 10 }, 2, DARKGRAY);
-        DrawLineEx(tB.pos, Vector2{ gate.pos.x - 20, gate.pos.y + 10 }, 2, DARKGRAY);
+        DrawLineEx(tA.pos, Vector2{ gate.pos.x - 20, gate.pos.y - 20 }, 2, DARKGRAY);
+        DrawLineEx(tB.pos, Vector2{ gate.pos.x - 20, gate.pos.y + 20 }, 2, DARKGRAY);
     }
 
-    DrawLineEx(Vector2{ gate.pos.x + 18, gate.pos.y }, tC.pos, 2, DARKGRAY);
+    DrawLineEx(Vector2{ gate.pos.x + 20, gate.pos.y }, tC.pos, 2, DARKGRAY);
     DrawText(getGateLabel(gate.type).c_str(), static_cast<int>(gate.pos.x - 16), static_cast<int>(gate.pos.y - 6), 10, BLACK);
     DrawCircleV(tC.pos, 3, BLUE);
 }
