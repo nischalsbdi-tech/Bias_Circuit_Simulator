@@ -6,8 +6,23 @@ using namespace std;
 enum class ToolMode {
     SELECT, RESISTOR, CAPACITOR, INDUCTOR, VOLTAGE_SOURCE,
     LED, AMMETER, SWITCH, TWO_WAY_SWITCH, AND_GATE, OR_GATE, NOT_GATE, NAND_GATE,
-    NOR_GATE, XOR_GATE, XNOR_GATE, GROUND, WIRE, PROBE
+    NOR_GATE, XOR_GATE, XNOR_GATE, GROUND, PROBE
 };
+
+// Tools that place a single component on click (everything except SELECT/PROBE).
+bool isPlaceableTool(ToolMode t) {
+    switch (t) {
+        case ToolMode::RESISTOR: case ToolMode::CAPACITOR: case ToolMode::INDUCTOR:
+        case ToolMode::VOLTAGE_SOURCE: case ToolMode::LED: case ToolMode::AMMETER:
+        case ToolMode::SWITCH: case ToolMode::TWO_WAY_SWITCH:
+        case ToolMode::AND_GATE: case ToolMode::OR_GATE: case ToolMode::NOT_GATE:
+        case ToolMode::NAND_GATE: case ToolMode::NOR_GATE: case ToolMode::XOR_GATE:
+        case ToolMode::XNOR_GATE: case ToolMode::GROUND:
+            return true;
+        default:
+            return false;
+    }
+}
 
 bool isEditableValueType(ComponentType t) {
     return t == ComponentType::RESISTOR || t == ComponentType::CAPACITOR ||
@@ -56,6 +71,34 @@ Vector2 snapVector(Vector2 v, float gridStep = 20.0f) {
         static_cast<float>(round(v.x / gridStep) * gridStep),
         static_cast<float>(round(v.y / gridStep) * gridStep)
     };
+}
+
+struct TerminalHit {
+    bool found = false;
+    Vector2 pos = { 0, 0 };
+};
+
+// Finds a connectable point (a component terminal or an existing wire endpoint) near mousePos.
+TerminalHit findNearestTerminal(const Circuit& circuit, Vector2 mousePos, float radius = 10.0f) {
+    float r2 = radius * radius;
+    for (const auto& c : circuit.components) {
+        Vector2 pts[3];
+        int n = 0;
+        pts[n++] = c->getTerminalA().pos;
+        if (c->type != ComponentType::GROUND && c->type != ComponentType::NOT_GATE) pts[n++] = c->getTerminalB().pos;
+        if (c->isLogicGate() || c->type == ComponentType::TWO_WAY_SWITCH) pts[n++] = c->getTerminalC().pos;
+        for (int i = 0; i < n; ++i) {
+            float dx = mousePos.x - pts[i].x, dy = mousePos.y - pts[i].y;
+            if (dx * dx + dy * dy <= r2) return TerminalHit{ true, pts[i] };
+        }
+    }
+    for (const auto& w : circuit.wires) {
+        float dx1 = mousePos.x - w.startPos.x, dy1 = mousePos.y - w.startPos.y;
+        if (dx1 * dx1 + dy1 * dy1 <= r2) return TerminalHit{ true, w.startPos };
+        float dx2 = mousePos.x - w.endPos.x, dy2 = mousePos.y - w.endPos.y;
+        if (dx2 * dx2 + dy2 * dy2 <= r2) return TerminalHit{ true, w.endPos };
+    }
+    return TerminalHit{};
 }
 
 bool DrawButton(Rectangle rect, const char* text, bool active = false, Color baseColor = LIGHTGRAY) {
@@ -149,14 +192,6 @@ int main() {
                 else if (currentTool == ToolMode::XOR_GATE) circuit.components.push_back(make_shared<Component>(ComponentType::XOR_GATE, snapped, 0.0));
                 else if (currentTool == ToolMode::XNOR_GATE) circuit.components.push_back(make_shared<Component>(ComponentType::XNOR_GATE, snapped, 0.0));
                 else if (currentTool == ToolMode::GROUND) circuit.components.push_back(make_shared<Component>(ComponentType::GROUND, snapped, 0.0));
-                else if (currentTool == ToolMode::WIRE) {
-                    if (!isWiring) { wireStartPos = snapped; isWiring = true; }
-                    else {
-                        if (snapped.x != wireStartPos.x || snapped.y != wireStartPos.y)
-                            circuit.wires.push_back(Wire{ wireStartPos, snapped });
-                        isWiring = false;
-                    }
-                }
                 else if (currentTool == ToolMode::PROBE) {
                     PointKey key = makePointKey(snapped);
                     if (circuit.pointToNodeMap.find(key) != circuit.pointToNodeMap.end()) {
@@ -164,33 +199,55 @@ int main() {
                     }
                 }
                 else if (currentTool == ToolMode::SELECT) {
-                    selectedComp = nullptr;
-                    selectedWireIdx = -1;
-                    for (auto& c : circuit.components) c->selected = false;
+                    // 1. Start a wire drag if we pressed on a terminal (component pin or wire end)
+                    TerminalHit hit = findNearestTerminal(circuit, mousePos);
+                    if (hit.found) {
+                        isWiring = true;
+                        wireStartPos = hit.pos;
+                    } else {
+                        selectedComp = nullptr;
+                        selectedWireIdx = -1;
+                        for (auto& c : circuit.components) c->selected = false;
 
-                    // 1. Select Component
-                    for (auto& c : circuit.components) {
-                        if (CheckCollisionPointRec(mousePos, c->getBounds())) {
-                            selectedComp = c; 
-                            c->selected = true; 
-                            isDragging = true; 
-                            pressPos = mousePos;
-                            pressedOnSwitch = c->isSwitch();
-                            break;
-                        }
-                    }
-
-                    // 2. Select Wire (if no component clicked)
-                    if (!selectedComp) {
-                        for (size_t i = 0; i < circuit.wires.size(); ++i) {
-                            if (CheckCollisionPointLine(mousePos, circuit.wires[i].startPos, circuit.wires[i].endPos, 8)) {
-                                selectedWireIdx = static_cast<int>(i);
+                        // 2. Select Component
+                        for (auto& c : circuit.components) {
+                            if (CheckCollisionPointRec(mousePos, c->getBounds())) {
+                                selectedComp = c;
+                                c->selected = true;
+                                isDragging = true;
+                                pressPos = mousePos;
+                                pressedOnSwitch = c->isSwitch();
                                 break;
+                            }
+                        }
+
+                        // 3. Select Wire (if no component clicked)
+                        if (!selectedComp) {
+                            for (size_t i = 0; i < circuit.wires.size(); ++i) {
+                                if (CheckCollisionPointLine(mousePos, circuit.wires[i].startPos, circuit.wires[i].endPos, 8)) {
+                                    selectedWireIdx = static_cast<int>(i);
+                                    break;
+                                }
                             }
                         }
                     }
                 }
+
+                // Placing a component switches back to SELECT/DRAG so parts don't stack on top
+                // of each other from repeated clicks on the same spot.
+                if (isPlaceableTool(currentTool)) currentTool = ToolMode::SELECT;
             }
+        }
+
+        // Finish a wire drag: connect to whatever terminal (or grid point) we release over.
+        // Checked unconditionally so releasing back over the sidebar doesn't leave it stuck.
+        if (isWiring && IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+            TerminalHit endHit = findNearestTerminal(circuit, mousePos);
+            Vector2 endPos = endHit.found ? endHit.pos : snapVector(mousePos);
+            if (mousePos.x > 240 && (endPos.x != wireStartPos.x || endPos.y != wireStartPos.y)) {
+                circuit.wires.push_back(Wire{ wireStartPos, endPos });
+            }
+            isWiring = false;
         }
 
         if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) { 
@@ -285,8 +342,9 @@ int main() {
 
         DrawRectangle(0, 0, 240, 720, Color{ 30, 34, 42, 255 });
         DrawText("LOGIC & ANALOG LAB", 15, 12, 16, RAYWHITE);
+        DrawText("Drag from a red/blue pin to wire", 15, 30, 10, GRAY);
 
-        int yPos = 38;
+        int yPos = 46;
         #define BTN(lbl, mode) if (DrawButton(Rectangle{ 15, (float)yPos, 210, 22 }, lbl, currentTool == mode)) { currentTool = mode; selectedWireIdx = -1; isEditingValue = false; } yPos += 25;
         BTN("SELECT / DRAG", ToolMode::SELECT);
         BTN("+ RESISTOR", ToolMode::RESISTOR);
@@ -305,7 +363,6 @@ int main() {
         BTN("+ XOR GATE", ToolMode::XOR_GATE);
         BTN("+ XNOR GATE", ToolMode::XNOR_GATE);
         BTN("+ GROUND (0V)", ToolMode::GROUND);
-        BTN("ADD WIRE", ToolMode::WIRE);
         BTN("PROBE NODE", ToolMode::PROBE);
         #undef BTN
 
