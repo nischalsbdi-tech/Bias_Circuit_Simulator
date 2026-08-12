@@ -62,6 +62,7 @@ int main() {
     Circuit circuit;
     ToolMode currentTool = ToolMode::SELECT;
     shared_ptr<Component> selectedComp = nullptr;
+    int selectedWireIdx = -1;
     bool isDragging = false, isWiring = false;
     Vector2 wireStartPos = { 0, 0 };
 
@@ -108,26 +109,76 @@ int main() {
                 }
                 else if (currentTool == ToolMode::SELECT) {
                     selectedComp = nullptr;
+                    selectedWireIdx = -1;
                     for (auto& c : circuit.components) c->selected = false;
+
+                    // 1. Select Component
                     for (auto& c : circuit.components) {
                         if (CheckCollisionPointRec(mousePos, c->getBounds())) {
-                            selectedComp = c; c->selected = true; isDragging = true; break;
+                            selectedComp = c; 
+                            c->selected = true; 
+                            isDragging = true; 
+                            break;
+                        }
+                    }
+
+                    // 2. Select Wire (if no component clicked)
+                    if (!selectedComp) {
+                        for (size_t i = 0; i < circuit.wires.size(); ++i) {
+                            if (CheckCollisionPointLine(mousePos, circuit.wires[i].startPos, circuit.wires[i].endPos, 8)) {
+                                selectedWireIdx = static_cast<int>(i);
+                                break;
+                            }
                         }
                     }
                 }
             }
         }
 
-        if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) { isWiring = false; currentTool = ToolMode::SELECT; }
+        if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) { 
+            isWiring = false; 
+            currentTool = ToolMode::SELECT; 
+            selectedWireIdx = -1;
+        }
+
+        // Dragging component and dragging attached wires together
         if (isDragging && selectedComp && IsMouseButtonDown(MOUSE_BUTTON_LEFT) && mousePos.x > 240) {
-            selectedComp->pos = snapVector(mousePos);
+            Vector2 newPos = snapVector(mousePos);
+            if (newPos.x != selectedComp->pos.x || newPos.y != selectedComp->pos.y) {
+                PointKey kA_old = makePointKey(selectedComp->getTerminalA().pos);
+                PointKey kB_old = makePointKey(selectedComp->getTerminalB().pos);
+                PointKey kC_old = makePointKey(selectedComp->getTerminalC().pos);
+
+                selectedComp->pos = newPos;
+
+                Vector2 tA_new = selectedComp->getTerminalA().pos;
+                Vector2 tB_new = selectedComp->getTerminalB().pos;
+                Vector2 tC_new = selectedComp->getTerminalC().pos;
+
+                for (auto& wire : circuit.wires) {
+                    PointKey kStart = makePointKey(wire.startPos);
+                    PointKey kEnd   = makePointKey(wire.endPos);
+
+                    if (kStart == kA_old)      wire.startPos = tA_new;
+                    else if (kStart == kB_old) wire.startPos = tB_new;
+                    else if (kStart == kC_old) wire.startPos = tC_new;
+
+                    if (kEnd == kA_old)      wire.endPos = tA_new;
+                    else if (kEnd == kB_old) wire.endPos = tB_new;
+                    else if (kEnd == kC_old) wire.endPos = tC_new;
+                }
+            }
         }
         if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) isDragging = false;
 
+        // Delete component OR selected wire
         if (IsKeyPressed(KEY_DELETE) || IsKeyPressed(KEY_BACKSPACE)) {
             if (selectedComp) {
                 circuit.components.erase(remove(circuit.components.begin(), circuit.components.end(), selectedComp), circuit.components.end());
                 selectedComp = nullptr;
+            } else if (selectedWireIdx >= 0 && selectedWireIdx < static_cast<int>(circuit.wires.size())) {
+                circuit.wires.erase(circuit.wires.begin() + selectedWireIdx);
+                selectedWireIdx = -1;
             }
         }
 
@@ -137,7 +188,17 @@ int main() {
         for (int x = 240; x <= 1280; x += 20)
             for (int y = 0; y <= 720; y += 20) DrawPixel(x, y, LIGHTGRAY);
 
-        for (const auto& wire : circuit.wires) wire.draw();
+        // Draw wires (highlighting the selected wire in blue)
+        for (size_t i = 0; i < circuit.wires.size(); ++i) {
+            if (static_cast<int>(i) == selectedWireIdx) {
+                DrawLineEx(circuit.wires[i].startPos, circuit.wires[i].endPos, 4.0f, BLUE);
+                DrawCircleV(circuit.wires[i].startPos, 4, BLUE);
+                DrawCircleV(circuit.wires[i].endPos, 4, BLUE);
+            } else {
+                circuit.wires[i].draw();
+            }
+        }
+
         if (isWiring) DrawLineEx(wireStartPos, snapVector(mousePos), 2, RED);
         for (const auto& comp : circuit.components) circuit.drawComponent(*comp);
 
@@ -156,7 +217,7 @@ int main() {
         DrawText("LOGIC & ANALOG LAB", 15, 12, 16, RAYWHITE);
 
         int yPos = 38;
-        #define BTN(lbl, mode) if (DrawButton(Rectangle{ 15, (float)yPos, 210, 22 }, lbl, currentTool == mode)) currentTool = mode; yPos += 25;
+        #define BTN(lbl, mode) if (DrawButton(Rectangle{ 15, (float)yPos, 210, 22 }, lbl, currentTool == mode)) { currentTool = mode; selectedWireIdx = -1; } yPos += 25;
         BTN("SELECT / DRAG", ToolMode::SELECT);
         BTN("+ RESISTOR", ToolMode::RESISTOR);
         BTN("+ CAPACITOR", ToolMode::CAPACITOR);
@@ -185,7 +246,7 @@ int main() {
         } yPos += 35;
 
         if (DrawButton(Rectangle{ 15, (float)yPos, 210, 24 }, "CLEAR ALL", false, MAROON)) {
-            circuit.clear(); selectedComp = nullptr;
+            circuit.clear(); selectedComp = nullptr; selectedWireIdx = -1;
         }
 
         EndDrawing();
