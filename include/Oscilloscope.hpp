@@ -2,20 +2,21 @@
 #define OSCILLOSCOPE_HPP
 
 #include "raylib.h"
+#include "Utils.hpp"
 #include <vector>
 #include <map>
-#include <cmath>
 #include <string>
 #include <sstream>
+#include <iomanip>
 
-// ---------- Ring Buffer (efficient, fixed capacity) ----------
+// ---------- Ring Buffer (fixed capacity) ----------
 template<typename T>
 class RingBuffer {
     std::vector<T> data;
     size_t head = 0;
     size_t count = 0;
 public:
-    explicit RingBuffer(size_t capacity = 2000) : data(capacity) {}
+    explicit RingBuffer(size_t capacity = 400) : data(capacity) {}
 
     void push(const T& value) {
         data[head] = value;
@@ -24,7 +25,6 @@ public:
     }
 
     size_t size() const { return count; }
-    size_t capacity() const { return data.size(); }
     bool empty() const { return count == 0; }
 
     // operator[]: 0 = oldest, size()-1 = newest
@@ -40,180 +40,101 @@ public:
     void clear() { count = 0; head = 0; }
 };
 
-// ---------- Oscilloscope class ----------
+// ---------- Minimalistic single-node, draggable Oscilloscope ----------
+// Only ever tracks ONE node at a time. It costs nothing and draws nowhere
+// unless "visible" is turned on from the sidebar toggle. Drag it by its
+// title bar to reposition it anywhere on the canvas.
 class Oscilloscope {
 public:
-    struct Trace {
-        int nodeId = -1;
-        Color color = WHITE;
-        RingBuffer<float> history{1000};
-        float voltsPerDiv = 1.0f;
-        float verticalOffset = 0.0f;
-    };
+    bool visible = false;      // toggled on/off from the sidebar
+    int nodeId = -1;           // -1 = nothing probed yet
+    RingBuffer<float> history{400};
+    float voltsPerDiv = 5.0f;  // fixed vertical scale (+-2 divs shown)
+    Rectangle bounds = { 900, 480, 480, 200 };
 
-    std::vector<Trace> traces;
-    float timePerDiv = 0.01f;           // seconds per horizontal division
-    int horizontalDivs = 10;
-    int verticalDivs = 8;
-    bool paused = false;
+private:
+    bool dragging = false;
+    Vector2 dragOffset = { 0, 0 };
+    static constexpr float TITLE_H = 18.0f;
 
-    // Trigger (simple placeholder)
-    enum TriggerMode { AUTO, NORMAL, SINGLE };
-    TriggerMode triggerMode = AUTO;
-    float triggerLevel = 0.0f;
-    bool triggerRising = true;
-
-    // Cursors (placeholder)
-    bool showCursors = false;
-    float cursor1Time = 0.0f, cursor2Time = 0.0f;
-
-    // -------- API --------
-    void addTrace(int nodeId, Color color) {
-        traces.push_back({nodeId, color, RingBuffer<float>(2000), 1.0f, 0.0f});
+public:
+    void setNode(int id) {
+        nodeId = id;
+        history.clear();
     }
 
-    void removeTrace(int index) {
-        if (index >= 0 && index < (int)traces.size())
-            traces.erase(traces.begin() + index);
+    void clearNode() {
+        nodeId = -1;
+        history.clear();
     }
 
-    void clearTraces() {
-        traces.clear();
+    void update(const std::map<int, double>& nodeVoltages, float /*dt*/) {
+        if (!visible || nodeId < 0) return;
+        auto it = nodeVoltages.find(nodeId);
+        if (it != nodeVoltages.end()) history.push(static_cast<float>(it->second));
     }
 
-    // Called every simulation step to push new data
-    void update(const std::map<int, double>& nodeVoltages, float dt) {
-        if (paused) return;
-        for (auto& trace : traces) {
-            auto it = nodeVoltages.find(trace.nodeId);
-            if (it != nodeVoltages.end()) {
-                trace.history.push(static_cast<float>(it->second));
-            }
+    // Call once per frame (before draw) so dragging the title bar works.
+    void handleDrag() {
+        if (!visible) return;
+        Vector2 m = GetMousePosition();
+        Rectangle titleBar = { bounds.x, bounds.y, bounds.width, TITLE_H };
+
+        if (!dragging && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(m, titleBar)) {
+            dragging = true;
+            dragOffset = { m.x - bounds.x, m.y - bounds.y };
         }
+        if (dragging && IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+            bounds.x = m.x - dragOffset.x;
+            bounds.y = m.y - dragOffset.y;
+        }
+        if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) dragging = false;
     }
 
-    // Draw the oscilloscope panel
-    void draw(Rectangle bounds) const {
-        // Background
-        DrawRectangleRec(bounds, Color{15, 20, 25, 230});
-        DrawRectangleLinesEx(bounds, 2, GREEN);
-        DrawText("OSCILLOSCOPE", (int)bounds.x + 10, (int)bounds.y + 6, 12, GREEN);
+    // Draws the panel. Does nothing if not visible - it simply isn't on the canvas.
+    void draw() const {
+        if (!visible) return;
 
-        if (traces.empty()) {
-            DrawText("Use PROBE tool on a node", (int)bounds.x + 20, (int)bounds.y + 70, 11, GRAY);
+        DrawRectangleRec(bounds, Color{ 12, 16, 20, 235 });
+        DrawRectangleLinesEx(bounds, 1, Color{ 90, 200, 120, 220 });
+
+        // title bar (drag handle)
+        Rectangle titleBar = { bounds.x, bounds.y, bounds.width, TITLE_H };
+        DrawRectangleRec(titleBar, Color{ 30, 40, 45, 255 });
+        DrawText("OSCILLOSCOPE  (drag here to move)", (int)bounds.x + 6, (int)bounds.y + 3, 10, LIGHTGRAY);
+
+        float left = bounds.x + 4, right = bounds.x + bounds.width - 4;
+        float top = bounds.y + TITLE_H + 20, bottom = bounds.y + bounds.height - 6;
+        float w = right - left, h = bottom - top;
+        float midY = top + h / 2.0f;
+
+        if (nodeId < 0) {
+            DrawText("Use PROBE to pick a node", (int)bounds.x + 10, (int)midY - 5, 10, GRAY);
             return;
         }
 
-        // Grid area
-        int left   = (int)bounds.x + 40;
-        int right  = (int)bounds.x + bounds.width - 20;
-        int top    = (int)bounds.y + 30;
-        int bottom = (int)bounds.y + bounds.height - 20;
-        float gridW = (float)(right - left);
-        float gridH = (float)(bottom - top);
-        float divW = gridW / horizontalDivs;
-        float divH = gridH / verticalDivs;
+        // single centre gridline - minimalistic, no ruled grid
+        DrawLine((int)left, (int)midY, (int)right, (int)midY, Color{ 60, 90, 90, 140 });
 
-        // Grid lines
-        for (int i = 0; i <= horizontalDivs; ++i) {
-            float x = left + i * divW;
-            DrawLine((int)x, top, (int)x, bottom, Color{60, 80, 80, 100});
+        // label: node id + latest reading, bold dark-green for legibility
+        std::string label = "N" + std::to_string(nodeId);
+        if (!history.empty()) {
+            std::ostringstream ss;
+            ss << std::fixed << std::setprecision(2) << history.back() << "V";
+            label += "  " + ss.str();
         }
-        for (int i = 0; i <= verticalDivs; ++i) {
-            float y = top + i * divH;
-            DrawLine(left, (int)y, right, (int)y, Color{60, 80, 80, 100});
+        DrawTextBold(label.c_str(), (int)bounds.x + 8, (int)bounds.y + TITLE_H + 4, 12, VOLT_TEXT_COLOR);
+
+        if (history.size() < 2) return;
+
+        size_t n = history.size();
+        for (size_t i = 1; i < n; ++i) {
+            float x1 = left + ((float)(i - 1) / (n - 1)) * w;
+            float x2 = left + ((float)i / (n - 1)) * w;
+            float y1 = midY - (history[i - 1] / voltsPerDiv) * (h / 2.0f);
+            float y2 = midY - (history[i]     / voltsPerDiv) * (h / 2.0f);
+            DrawLine((int)x1, (int)y1, (int)x2, (int)y2, GREEN);
         }
-
-        // Time labels (bottom)
-        for (int i = 0; i <= horizontalDivs; ++i) {
-            float time = i * timePerDiv;
-            std::string label = std::to_string(time) + "s";
-            DrawText(label.c_str(), (int)(left + i*divW - 10), bottom + 2, 8, GRAY);
-        }
-        // Voltage labels (left) – assume centre = 0V, scale = 1V/div for display
-        for (int i = 0; i <= verticalDivs; ++i) {
-            float v = (verticalDivs/2.0f - i) * 1.0f;
-            std::string label = std::to_string(v);
-            DrawText(label.c_str(), (int)(left - 30), (int)(top + i*divH - 4), 8, GRAY);
-        }
-
-        // Draw each trace
-        for (const auto& trace : traces) {
-            if (trace.history.size() < 2) continue;
-
-            size_t n = trace.history.size();
-            // Map all history points to the full width of the grid
-            for (size_t i = 1; i < n; ++i) {
-                float x1 = left + ((float)(i-1) / (n-1)) * gridW;
-                float x2 = left + ((float)i / (n-1)) * gridW;
-                float v1 = trace.history[i-1] - trace.verticalOffset;
-                float v2 = trace.history[i] - trace.verticalOffset;
-                float y1 = top + (verticalDivs/2.0f - v1 / trace.voltsPerDiv) * divH;
-                float y2 = top + (verticalDivs/2.0f - v2 / trace.voltsPerDiv) * divH;
-                DrawLine((int)x1, (int)y1, (int)x2, (int)y2, trace.color);
-            }
-
-            // Show node ID and current voltage in the legend
-            if (!trace.history.empty()) {
-                std::string info = "N" + std::to_string(trace.nodeId) + " " +
-                                   std::to_string(trace.history.back()) + "V";
-                DrawText(info.c_str(), (int)(bounds.x + bounds.width - 130),
-                         (int)(bounds.y + 8), 10, trace.color);
-            }
-        }
-
-        // Trigger indicator
-        if (triggerMode != AUTO) {
-            float triggerY = top + (verticalDivs/2.0f - triggerLevel / 1.0f) * divH;
-            DrawLine(left, triggerY, right, triggerY, RED);
-            DrawText("TRIG", (int)left+5, (int)triggerY-8, 10, RED);
-        }
-
-        // Cursors placeholder
-        if (showCursors) {
-            // draw vertical lines – to be implemented
-        }
-
-        // Info line
-        std::string info = "Time/Div: " + std::to_string(timePerDiv) + "s";
-        DrawText(info.c_str(), (int)bounds.x + 10, (int)bounds.y + bounds.height - 18, 10, LIGHTGRAY);
-    }
-
-    // Draw small control buttons inside the oscilloscope panel
-    void drawControls(Rectangle bounds) {
-        int y = (int)(bounds.y + bounds.height - 18);
-        int x = (int)(bounds.x + bounds.width - 200);
-
-        // Pause button
-        const char* pauseLabel = paused ? "RESUME" : "PAUSE";
-        Rectangle btn = { (float)x, (float)y, 50, 16 };
-        DrawRectangleRec(btn, paused ? ORANGE : DARKGREEN);
-        DrawText(pauseLabel, (int)btn.x+5, (int)btn.y+3, 10, WHITE);
-        if (CheckCollisionPointRec(GetMousePosition(), btn) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
-            paused = !paused;
-
-        // Time/Div arrows
-        x += 55;
-        if (drawSmallButton(x, y, "<", LIGHTGRAY)) {
-            timePerDiv = std::max(0.001f, timePerDiv * 0.5f);
-        }
-        x += 20;
-        DrawText((std::to_string(timePerDiv) + "s").c_str(), x, y+2, 10, RAYWHITE);
-        x += 55;
-        if (drawSmallButton(x, y, ">", LIGHTGRAY)) {
-            timePerDiv = std::min(1.0f, timePerDiv * 2.0f);
-        }
-    }
-
-private:
-    bool drawSmallButton(int x, int y, const char* label, Color color) {
-        Rectangle rect = { (float)x, (float)y, 16, 16 };
-        Vector2 mouse = GetMousePosition();
-        bool hover = CheckCollisionPointRec(mouse, rect);
-        DrawRectangleRec(rect, hover ? RAYWHITE : color);
-        DrawRectangleLinesEx(rect, 1, DARKGRAY);
-        DrawText(label, (int)rect.x+4, (int)rect.y+3, 10, BLACK);
-        return hover && IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
     }
 };
 

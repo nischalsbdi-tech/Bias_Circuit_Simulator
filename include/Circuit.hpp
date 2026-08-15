@@ -6,6 +6,7 @@
 #include "Wire.hpp"
 #include "Solver.hpp"
 #include "Oscilloscope.hpp"
+#include "Utils.hpp"
 #include <vector>
 #include <memory>
 #include <map>
@@ -45,7 +46,8 @@ public:
         wires.clear();
         pointToNodeMap.clear();
         nodeVoltages.clear();
-        scope.clearTraces();
+        scope.clearNode();
+        scope.visible = false;
     }
 
     void rotateComponent(shared_ptr<Component>& comp) {
@@ -160,6 +162,23 @@ public:
             if (abs(comp.current) < 1.0) ss << fixed << setprecision(1) << (comp.current * 1000.0) << " mA";
             else ss << fixed << setprecision(2) << comp.current << " A";
             DrawText(ss.str().c_str(), static_cast<int>(comp.pos.x - 20), static_cast<int>(comp.pos.y + 22), 11, PURPLE);
+        } else if (comp.type == ComponentType::VOLTMETER) {
+            DrawLineEx(tA.pos, Vector2{ comp.pos.x - 18, comp.pos.y }, 2, DARKGRAY);
+            DrawLineEx(Vector2{ comp.pos.x + 18, comp.pos.y }, tB.pos, 2, DARKGRAY);
+            DrawCircleV(comp.pos, 18, LIGHTGRAY);
+            DrawCircleLines(static_cast<int>(comp.pos.x), static_cast<int>(comp.pos.y), 18, bodyColor);
+            DrawText("V", static_cast<int>(comp.pos.x - 4), static_cast<int>(comp.pos.y - 7), 14, DARKGREEN);
+
+            auto itA = pointToNodeMap.find(makePointKey(tA.pos));
+            auto itB = pointToNodeMap.find(makePointKey(tB.pos));
+            int nAId = (itA != pointToNodeMap.end()) ? itA->second : -1;
+            int nBId = (itB != pointToNodeMap.end()) ? itB->second : -1;
+            auto vIt = [this](int id) { auto it = nodeVoltages.find(id); return it != nodeVoltages.end() ? it->second : 0.0; };
+            double vA = (nAId >= 0) ? vIt(nAId) : 0.0;
+            double vB = (nBId >= 0) ? vIt(nBId) : 0.0;
+
+            stringstream ss; ss << fixed << setprecision(2) << (vA - vB) << " V";
+            DrawTextBold(ss.str().c_str(), static_cast<int>(comp.pos.x - 20), static_cast<int>(comp.pos.y + 22), 11, VOLT_TEXT_COLOR);
         }
 
         // ---- Particle (unchanged) ----
@@ -186,10 +205,7 @@ public:
 
         auto isProbed = [&](int nodeId) -> bool {
             if (nodeId < 0) return false;
-            for (const auto& trace : scope.traces) {
-                if (trace.nodeId == nodeId) return true;
-            }
-            return false;
+            return scope.nodeId == nodeId;
         };
 
         bool probedA = isProbed(nodeA);
@@ -220,6 +236,38 @@ public:
         if (probedC && (comp.type == ComponentType::TWO_WAY_SWITCH || comp.isLogicGate())) {
             Terminal tC = comp.getTerminalC();
             DrawCircleLines(tC.pos.x, tC.pos.y, 6, WHITE);
+        }
+    }
+
+    // Draws a small "N<id>" label near every node. While the simulation is
+    // paused/being built it only shows the node id (helps you check wiring).
+    // While running it shows "N<id> <voltage>V" in green.
+    void drawNodeLabels(bool showVoltage) const {
+        map<int, PointKey> repPoint;
+        for (const auto& pair : pointToNodeMap) {
+            int id = pair.second;
+            auto it = repPoint.find(id);
+            if (it == repPoint.end()) {
+                repPoint[id] = pair.first;
+            } else if (pair.first.y < it->second.y || (pair.first.y == it->second.y && pair.first.x < it->second.x)) {
+                it->second = pair.first;
+            }
+        }
+
+        for (const auto& pair : repPoint) {
+            int id = pair.first;
+            const PointKey& pk = pair.second;
+            stringstream ss;
+            ss << "N" << id;
+            Color col = SKYBLUE;
+            if (showVoltage) {
+                auto it = nodeVoltages.find(id);
+                double v = (it != nodeVoltages.end()) ? it->second : 0.0;
+                ss << " " << fixed << setprecision(2) << v << "V";
+                DrawTextBold(ss.str().c_str(), pk.x + 4, pk.y - 14, 11, VOLT_TEXT_COLOR);
+                continue;
+            }
+            DrawText(ss.str().c_str(), pk.x + 4, pk.y - 14, 10, col);
         }
     }
 
@@ -289,6 +337,7 @@ public:
             else if (comp->type == ComponentType::CAPACITOR) { G = comp->value / max(dt, 1e-6); reqCurrent = G * comp->vPrev; }
             else if (comp->type == ComponentType::INDUCTOR) { G = dt / max(comp->value, 1e-6); reqCurrent = -comp->iPrev; }
             else if (comp->type == ComponentType::AMMETER) G = 1.0 / 0.0001;
+            else if (comp->type == ComponentType::VOLTMETER) G = 1e-9; // ideal (infinite-impedance) voltmeter
             else if (comp->type == ComponentType::SWITCH) G = comp->switchOn ? (1.0 / 0.0001) : 1e-9;
             else if (comp->type == ComponentType::LED) {
                 double vDiff = nodeVoltages[nA] - nodeVoltages[nB];
@@ -298,6 +347,7 @@ public:
 
             if (comp->type == ComponentType::RESISTOR || comp->type == ComponentType::CAPACITOR ||
                 comp->type == ComponentType::INDUCTOR || comp->type == ComponentType::AMMETER ||
+                comp->type == ComponentType::VOLTMETER ||
                 comp->type == ComponentType::SWITCH || comp->type == ComponentType::LED) {
                 if (nA > 0) { A[nA - 1][nA - 1] += G; z[nA - 1] += reqCurrent; }
                 if (nB > 0) { A[nB - 1][nB - 1] += G; z[nB - 1] -= reqCurrent; }
