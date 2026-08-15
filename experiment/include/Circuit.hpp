@@ -5,6 +5,7 @@
 #include "LogicGates.hpp"
 #include "Wire.hpp"
 #include "Solver.hpp"
+#include "Oscilloscope.hpp"
 #include <vector>
 #include <memory>
 #include <map>
@@ -37,16 +38,39 @@ public:
 
     bool isRunning = false;
     double simTime = 0.0;
-    int probedNodeId = -1;
-    vector<float> oscilloscopeHistory;
+    Oscilloscope scope;
 
     void clear() {
         components.clear();
         wires.clear();
         pointToNodeMap.clear();
         nodeVoltages.clear();
-        oscilloscopeHistory.clear();
-        probedNodeId = -1;
+        scope.clearTraces();
+    }
+
+    void rotateComponent(shared_ptr<Component>& comp) {
+        if (!comp) return;
+        PointKey oldA = makePointKey(comp->getTerminalA().pos);
+        PointKey oldB = makePointKey(comp->getTerminalB().pos);
+        PointKey oldC = makePointKey(comp->getTerminalC().pos);
+
+        comp->isHorizontal = !comp->isHorizontal;
+
+        Vector2 newA = comp->getTerminalA().pos;
+        Vector2 newB = comp->getTerminalB().pos;
+        Vector2 newC = comp->getTerminalC().pos;
+
+        for (auto& wire : wires) {
+            PointKey s = makePointKey(wire.startPos);
+            PointKey e = makePointKey(wire.endPos);
+            if (s == oldA) wire.startPos = newA;
+            else if (s == oldB) wire.startPos = newB;
+            else if (s == oldC) wire.startPos = newC;
+
+            if (e == oldA) wire.endPos = newA;
+            else if (e == oldB) wire.endPos = newB;
+            else if (e == oldC) wire.endPos = newC;
+        }
     }
 
     void drawComponent(const Component& comp) const {
@@ -138,14 +162,65 @@ public:
             DrawText(ss.str().c_str(), static_cast<int>(comp.pos.x - 20), static_cast<int>(comp.pos.y + 22), 11, PURPLE);
         }
 
+        // ---- Particle (unchanged) ----
         if (abs(comp.current) > 1e-4 && comp.type != ComponentType::GROUND && !comp.isLogicGate() && comp.type != ComponentType::TWO_WAY_SWITCH) {
             Vector2 pPos = Vector2{ tA.pos.x + (tB.pos.x - tA.pos.x) * comp.particleProgress,
                                    tA.pos.y + (tB.pos.y - tA.pos.y) * comp.particleProgress };
             DrawCircleV(pPos, 4, YELLOW);
         }
 
-        DrawCircleV(tA.pos, 4, RED);
-        if (comp.type != ComponentType::GROUND && comp.type != ComponentType::NOT_GATE) DrawCircleV(tB.pos, 4, BLUE);
+        // ---- PROBE INDICATOR: change terminal colors if node is probed ----
+        auto getNodeId = [&](const Vector2& pos) -> int {
+            PointKey key = makePointKey(pos);
+            auto it = pointToNodeMap.find(key);
+            return (it != pointToNodeMap.end()) ? it->second : -1;
+        };
+
+        int nodeA = getNodeId(tA.pos);
+        int nodeB = getNodeId(tB.pos);
+        int nodeC = -1;
+        if (comp.type == ComponentType::TWO_WAY_SWITCH || comp.isLogicGate()) {
+            Terminal tC = comp.getTerminalC();
+            nodeC = getNodeId(tC.pos);
+        }
+
+        auto isProbed = [&](int nodeId) -> bool {
+            if (nodeId < 0) return false;
+            for (const auto& trace : scope.traces) {
+                if (trace.nodeId == nodeId) return true;
+            }
+            return false;
+        };
+
+        bool probedA = isProbed(nodeA);
+        bool probedB = isProbed(nodeB);
+        bool probedC = isProbed(nodeC);
+
+        Color colorA = probedA ? GREEN : RED;
+        Color colorB = probedB ? GREEN : BLUE;
+        Color colorC = probedC ? GREEN : BLUE;
+
+        // Draw terminal circles (override previous)
+        DrawCircleV(tA.pos, 4, colorA);
+        if (comp.type != ComponentType::GROUND && comp.type != ComponentType::NOT_GATE) {
+            DrawCircleV(tB.pos, 4, colorB);
+        }
+        if (comp.type == ComponentType::TWO_WAY_SWITCH || comp.isLogicGate()) {
+            Terminal tC = comp.getTerminalC();
+            DrawCircleV(tC.pos, 4, colorC);
+        }
+
+        // Draw white outline for probed terminals
+        if (probedA) {
+            DrawCircleLines(tA.pos.x, tA.pos.y, 6, WHITE);
+        }
+        if (probedB && comp.type != ComponentType::GROUND && comp.type != ComponentType::NOT_GATE) {
+            DrawCircleLines(tB.pos.x, tB.pos.y, 6, WHITE);
+        }
+        if (probedC && (comp.type == ComponentType::TWO_WAY_SWITCH || comp.isLogicGate())) {
+            Terminal tC = comp.getTerminalC();
+            DrawCircleLines(tC.pos.x, tC.pos.y, 6, WHITE);
+        }
     }
 
     void stepSimulation(double dt = 0.001) {
@@ -312,11 +387,7 @@ public:
             wire.updateParticles(static_cast<float>(dt));
         }
 
-        if (probedNodeId >= 0 && nodeVoltages.find(probedNodeId) != nodeVoltages.end()) {
-            oscilloscopeHistory.push_back(static_cast<float>(nodeVoltages[probedNodeId]));
-            if (oscilloscopeHistory.size() > 300) oscilloscopeHistory.erase(oscilloscopeHistory.begin());
-        }
-
+        scope.update(nodeVoltages, (float)dt);
         simTime += dt;
     }
 };

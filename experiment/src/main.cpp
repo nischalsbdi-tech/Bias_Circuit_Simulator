@@ -1,15 +1,17 @@
 #include "raylib.h"
 #include "Circuit.hpp"
+#include <algorithm>
+#include <vector>
+#include <sstream>
 
 using namespace std;
 
 enum class ToolMode {
     SELECT, RESISTOR, CAPACITOR, INDUCTOR, VOLTAGE_SOURCE,
     LED, AMMETER, SWITCH, TWO_WAY_SWITCH, AND_GATE, OR_GATE, NOT_GATE, NAND_GATE,
-    NOR_GATE, XOR_GATE, XNOR_GATE, GROUND, PROBE
+    NOR_GATE, XOR_GATE, XNOR_GATE, GROUND, PROBE, ROTATE
 };
 
-// Tools that place a single component on click (everything except SELECT/PROBE).
 bool isPlaceableTool(ToolMode t) {
     switch (t) {
         case ToolMode::RESISTOR: case ToolMode::CAPACITOR: case ToolMode::INDUCTOR:
@@ -39,7 +41,6 @@ string editUnitSuffix(ComponentType t) {
     }
 }
 
-// Converts the component's internal value into the friendly unit shown/edited in the UI.
 string valueToEditString(const shared_ptr<Component>& c) {
     double v = c->value;
     if (c->type == ComponentType::CAPACITOR) v = c->value * 1e6;
@@ -49,7 +50,6 @@ string valueToEditString(const shared_ptr<Component>& c) {
     return ss.str();
 }
 
-// Parses the edit buffer (in the friendly unit) and, if valid, applies it live to the component.
 void applyEditBuffer(const shared_ptr<Component>& c, const string& buf) {
     if (!c || buf.empty() || buf == "-" || buf == ".") return;
     try {
@@ -78,7 +78,6 @@ struct TerminalHit {
     Vector2 pos = { 0, 0 };
 };
 
-// Finds a connectable point (a component terminal or an existing wire endpoint) near mousePos.
 TerminalHit findNearestTerminal(const Circuit& circuit, Vector2 mousePos, float radius = 10.0f) {
     float r2 = radius * radius;
     for (const auto& c : circuit.components) {
@@ -112,36 +111,37 @@ bool DrawButton(Rectangle rect, const char* text, bool active = false, Color bas
     return hovered && IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
 }
 
-void DrawOscilloscope(const Circuit& circuit, Rectangle bounds) {
-    DrawRectangleRec(bounds, Color{ 15, 20, 25, 230 });
-    DrawRectangleLinesEx(bounds, 2, GREEN);
-    DrawText("OSCILLOSCOPE PROBE", static_cast<int>(bounds.x + 10), static_cast<int>(bounds.y + 8), 12, GREEN);
+void DrawNodeTable(const Circuit& circuit, Rectangle bounds) {
+    DrawRectangleRec(bounds, Color{ 20, 25, 35, 220 });
+    DrawRectangleLinesEx(bounds, 2, Color{ 100, 200, 255, 200 });
+    DrawText("NODE VOLTAGES", static_cast<int>(bounds.x + 10), static_cast<int>(bounds.y + 6), 12, LIGHTGRAY);
 
-    if (circuit.probedNodeId < 0) {
-        DrawText("Click 'PROBE' and select a node", static_cast<int>(bounds.x + 20), static_cast<int>(bounds.y + 70), 11, GRAY);
-        return;
+    vector<pair<int, double>> nodes;
+    for (const auto& kv : circuit.nodeVoltages) nodes.push_back(kv);
+    sort(nodes.begin(), nodes.end(), [](auto& a, auto& b){ return a.first < b.first; });
+
+    int yOffset = 26, rowHeight = 16;
+    int maxRows = static_cast<int>((bounds.height - 30) / rowHeight);
+    int displayed = 0;
+    for (const auto& [id, v] : nodes) {
+        if (displayed >= maxRows) break;
+        stringstream ss;
+        ss << "N" << id << " : " << fixed << setprecision(3) << v << " V";
+        DrawText(ss.str().c_str(),
+                 static_cast<int>(bounds.x + 12),
+                 static_cast<int>(bounds.y + yOffset),
+                 11, (id == 0) ? ORANGE : RAYWHITE);
+        yOffset += rowHeight; displayed++;
     }
-
-    const auto& hist = circuit.oscilloscopeHistory;
-    if (hist.size() < 2) return;
-
-    float minV = *min_element(hist.begin(), hist.end()) - 0.5f;
-    float maxV = *max_element(hist.begin(), hist.end()) + 0.5f;
-
-    for (size_t i = 1; i < hist.size(); ++i) {
-        float x1 = bounds.x + (i - 1) * (bounds.width / 300.0f);
-        float y1 = bounds.y + bounds.height - ((hist[i - 1] - minV) / (maxV - minV)) * bounds.height;
-        float x2 = bounds.x + i * (bounds.width / 300.0f);
-        float y2 = bounds.y + bounds.height - ((hist[i] - minV) / (maxV - minV)) * bounds.height;
-        DrawLineEx(Vector2{ x1, y1 }, Vector2{ x2, y2 }, 2, LIME);
+    if (static_cast<int>(nodes.size()) > maxRows) {
+        DrawText("...", static_cast<int>(bounds.x + 12), static_cast<int>(bounds.y + yOffset), 11, GRAY);
     }
-
-    stringstream ss; ss << "Node " << circuit.probedNodeId << ": " << fixed << setprecision(2) << hist.back() << " V";
-    DrawText(ss.str().c_str(), static_cast<int>(bounds.x + bounds.width - 130), static_cast<int>(bounds.y + 8), 12, YELLOW);
 }
 
 int main() {
-    InitWindow(1280, 720, "Transient Circuit Simulator - Logic & Analog");
+    const int SCREEN_WIDTH = 1600;
+    const int SCREEN_HEIGHT = 900;
+    InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Transient Circuit Simulator - Logic & Analog");
     SetTargetFPS(60);
 
     Circuit circuit;
@@ -150,14 +150,13 @@ int main() {
     int selectedWireIdx = -1;
     bool isDragging = false, isWiring = false;
     Vector2 wireStartPos = { 0, 0 };
-
-    // Switch click-to-toggle tracking (a click that doesn't drag toggles the switch)
     bool pressedOnSwitch = false;
     Vector2 pressPos = { 0, 0 };
-
-    // Value editing state
     bool isEditingValue = false;
     string editBuffer = "";
+
+    Color traceColors[] = { LIME, YELLOW, MAGENTA, GREEN, ORANGE, PINK, SKYBLUE, VIOLET };
+    int colorIndex = 0;
 
     while (!WindowShouldClose()) {
         Vector2 mousePos = GetMousePosition();
@@ -172,34 +171,62 @@ int main() {
             circuit.stepSimulation(0.0);
         }
 
+        // ---- rotate with arrow keys or R ----
+        if (selectedComp && !isEditingValue) {
+            if (IsKeyPressed(KEY_LEFT) || IsKeyPressed(KEY_RIGHT) ||
+                IsKeyPressed(KEY_UP) || IsKeyPressed(KEY_DOWN) ||
+                IsKeyPressed(KEY_R)) {
+                circuit.rotateComponent(selectedComp);
+            }
+        }
+
         if (!isEditingValue && mousePos.x > 240) {
             if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
                 Vector2 snapped = snapVector(mousePos);
 
-                if (currentTool == ToolMode::RESISTOR) circuit.components.push_back(make_shared<Component>(ComponentType::RESISTOR, snapped, 100.0));
-                else if (currentTool == ToolMode::CAPACITOR) circuit.components.push_back(make_shared<Component>(ComponentType::CAPACITOR, snapped, 100e-6));
-                else if (currentTool == ToolMode::INDUCTOR) circuit.components.push_back(make_shared<Component>(ComponentType::INDUCTOR, snapped, 10e-3));
-                else if (currentTool == ToolMode::VOLTAGE_SOURCE) circuit.components.push_back(make_shared<Component>(ComponentType::VOLTAGE_SOURCE, snapped, 5.0));
-                else if (currentTool == ToolMode::LED) circuit.components.push_back(make_shared<Component>(ComponentType::LED, snapped, 0.0));
-                else if (currentTool == ToolMode::AMMETER) circuit.components.push_back(make_shared<Component>(ComponentType::AMMETER, snapped, 0.0));
-                else if (currentTool == ToolMode::SWITCH) circuit.components.push_back(make_shared<Component>(ComponentType::SWITCH, snapped, 0.0));
-                else if (currentTool == ToolMode::TWO_WAY_SWITCH) circuit.components.push_back(make_shared<Component>(ComponentType::TWO_WAY_SWITCH, snapped, 0.0));
-                else if (currentTool == ToolMode::AND_GATE) circuit.components.push_back(make_shared<Component>(ComponentType::AND_GATE, snapped, 0.0));
-                else if (currentTool == ToolMode::OR_GATE) circuit.components.push_back(make_shared<Component>(ComponentType::OR_GATE, snapped, 0.0));
-                else if (currentTool == ToolMode::NOT_GATE) circuit.components.push_back(make_shared<Component>(ComponentType::NOT_GATE, snapped, 0.0));
-                else if (currentTool == ToolMode::NAND_GATE) circuit.components.push_back(make_shared<Component>(ComponentType::NAND_GATE, snapped, 0.0));
-                else if (currentTool == ToolMode::NOR_GATE) circuit.components.push_back(make_shared<Component>(ComponentType::NOR_GATE, snapped, 0.0));
-                else if (currentTool == ToolMode::XOR_GATE) circuit.components.push_back(make_shared<Component>(ComponentType::XOR_GATE, snapped, 0.0));
-                else if (currentTool == ToolMode::XNOR_GATE) circuit.components.push_back(make_shared<Component>(ComponentType::XNOR_GATE, snapped, 0.0));
-                else if (currentTool == ToolMode::GROUND) circuit.components.push_back(make_shared<Component>(ComponentType::GROUND, snapped, 0.0));
+                if (isPlaceableTool(currentTool)) {
+                    if (currentTool == ToolMode::RESISTOR) circuit.components.push_back(make_shared<Component>(ComponentType::RESISTOR, snapped, 100.0));
+                    else if (currentTool == ToolMode::CAPACITOR) circuit.components.push_back(make_shared<Component>(ComponentType::CAPACITOR, snapped, 100e-6));
+                    else if (currentTool == ToolMode::INDUCTOR) circuit.components.push_back(make_shared<Component>(ComponentType::INDUCTOR, snapped, 10e-3));
+                    else if (currentTool == ToolMode::VOLTAGE_SOURCE) circuit.components.push_back(make_shared<Component>(ComponentType::VOLTAGE_SOURCE, snapped, 5.0));
+                    else if (currentTool == ToolMode::LED) circuit.components.push_back(make_shared<Component>(ComponentType::LED, snapped, 0.0));
+                    else if (currentTool == ToolMode::AMMETER) circuit.components.push_back(make_shared<Component>(ComponentType::AMMETER, snapped, 0.0));
+                    else if (currentTool == ToolMode::SWITCH) circuit.components.push_back(make_shared<Component>(ComponentType::SWITCH, snapped, 0.0));
+                    else if (currentTool == ToolMode::TWO_WAY_SWITCH) circuit.components.push_back(make_shared<Component>(ComponentType::TWO_WAY_SWITCH, snapped, 0.0));
+                    else if (currentTool == ToolMode::AND_GATE) circuit.components.push_back(make_shared<Component>(ComponentType::AND_GATE, snapped, 0.0));
+                    else if (currentTool == ToolMode::OR_GATE) circuit.components.push_back(make_shared<Component>(ComponentType::OR_GATE, snapped, 0.0));
+                    else if (currentTool == ToolMode::NOT_GATE) circuit.components.push_back(make_shared<Component>(ComponentType::NOT_GATE, snapped, 0.0));
+                    else if (currentTool == ToolMode::NAND_GATE) circuit.components.push_back(make_shared<Component>(ComponentType::NAND_GATE, snapped, 0.0));
+                    else if (currentTool == ToolMode::NOR_GATE) circuit.components.push_back(make_shared<Component>(ComponentType::NOR_GATE, snapped, 0.0));
+                    else if (currentTool == ToolMode::XOR_GATE) circuit.components.push_back(make_shared<Component>(ComponentType::XOR_GATE, snapped, 0.0));
+                    else if (currentTool == ToolMode::XNOR_GATE) circuit.components.push_back(make_shared<Component>(ComponentType::XNOR_GATE, snapped, 0.0));
+                    else if (currentTool == ToolMode::GROUND) circuit.components.push_back(make_shared<Component>(ComponentType::GROUND, snapped, 0.0));
+                }
                 else if (currentTool == ToolMode::PROBE) {
                     PointKey key = makePointKey(snapped);
                     if (circuit.pointToNodeMap.find(key) != circuit.pointToNodeMap.end()) {
-                        circuit.probedNodeId = circuit.pointToNodeMap[key];
+                        int nodeId = circuit.pointToNodeMap[key];
+                        bool exists = false;
+                        for (const auto& t : circuit.scope.traces)
+                            if (t.nodeId == nodeId) { exists = true; break; }
+                        if (!exists) {
+                            Color col = traceColors[colorIndex % 8];
+                            colorIndex++;
+                            circuit.scope.addTrace(nodeId, col);
+                        }
+                    }
+                }
+                else if (currentTool == ToolMode::ROTATE) {
+                    for (auto& c : circuit.components) {
+                        if (CheckCollisionPointRec(mousePos, c->getBounds())) {
+                            circuit.rotateComponent(c);
+                            selectedComp = c;
+                            c->selected = true;
+                            break;
+                        }
                     }
                 }
                 else if (currentTool == ToolMode::SELECT) {
-                    // 1. Start a wire drag if we pressed on a terminal (component pin or wire end)
                     TerminalHit hit = findNearestTerminal(circuit, mousePos);
                     if (hit.found) {
                         isWiring = true;
@@ -209,7 +236,6 @@ int main() {
                         selectedWireIdx = -1;
                         for (auto& c : circuit.components) c->selected = false;
 
-                        // 2. Select Component
                         for (auto& c : circuit.components) {
                             if (CheckCollisionPointRec(mousePos, c->getBounds())) {
                                 selectedComp = c;
@@ -221,7 +247,6 @@ int main() {
                             }
                         }
 
-                        // 3. Select Wire (if no component clicked)
                         if (!selectedComp) {
                             for (size_t i = 0; i < circuit.wires.size(); ++i) {
                                 if (CheckCollisionPointLine(mousePos, circuit.wires[i].startPos, circuit.wires[i].endPos, 8)) {
@@ -233,14 +258,11 @@ int main() {
                     }
                 }
 
-                // Placing a component switches back to SELECT/DRAG so parts don't stack on top
-                // of each other from repeated clicks on the same spot.
                 if (isPlaceableTool(currentTool)) currentTool = ToolMode::SELECT;
             }
         }
 
-        // Finish a wire drag: connect to whatever terminal (or grid point) we release over.
-        // Checked unconditionally so releasing back over the sidebar doesn't leave it stuck.
+        // ---- finish wire ----
         if (isWiring && IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
             TerminalHit endHit = findNearestTerminal(circuit, mousePos);
             Vector2 endPos = endHit.found ? endHit.pos : snapVector(mousePos);
@@ -250,13 +272,13 @@ int main() {
             isWiring = false;
         }
 
-        if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) { 
-            isWiring = false; 
-            currentTool = ToolMode::SELECT; 
+        if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) {
+            isWiring = false;
+            currentTool = ToolMode::SELECT;
             selectedWireIdx = -1;
         }
 
-        // Dragging component and dragging attached wires together
+        // ---- drag component ----
         if (isDragging && selectedComp && IsMouseButtonDown(MOUSE_BUTTON_LEFT) && mousePos.x > 240) {
             Vector2 newPos = snapVector(mousePos);
             if (newPos.x != selectedComp->pos.x || newPos.y != selectedComp->pos.y) {
@@ -285,8 +307,6 @@ int main() {
             }
         }
         if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
-            // A click (press+release with little movement) on a switch toggles it;
-            // a click-and-drag instead moves it, like every other component.
             if (pressedOnSwitch && selectedComp) {
                 float dx = mousePos.x - pressPos.x, dy = mousePos.y - pressPos.y;
                 if ((dx * dx + dy * dy) < 36.0f) {
@@ -298,7 +318,7 @@ int main() {
             pressedOnSwitch = false;
         }
 
-        // Delete component OR selected wire (disabled while typing a value)
+        // ---- delete ----
         if (!isEditingValue && (IsKeyPressed(KEY_DELETE) || IsKeyPressed(KEY_BACKSPACE))) {
             if (selectedComp) {
                 circuit.components.erase(remove(circuit.components.begin(), circuit.components.end(), selectedComp), circuit.components.end());
@@ -309,13 +329,14 @@ int main() {
             }
         }
 
+        // ---- drawing ----
         BeginDrawing();
         ClearBackground(RAYWHITE);
 
-        for (int x = 240; x <= 1280; x += 20)
-            for (int y = 0; y <= 720; y += 20) DrawPixel(x, y, LIGHTGRAY);
+        for (int x = 240; x < SCREEN_WIDTH; x += 20)
+            for (int y = 0; y < SCREEN_HEIGHT; y += 20)
+                DrawPixel(x, y, LIGHTGRAY);
 
-        // Draw wires (highlighting the selected wire in blue)
         for (size_t i = 0; i < circuit.wires.size(); ++i) {
             if (static_cast<int>(i) == selectedWireIdx) {
                 DrawLineEx(circuit.wires[i].startPos, circuit.wires[i].endPos, 4.0f, BLUE);
@@ -329,18 +350,15 @@ int main() {
         if (isWiring) DrawLineEx(wireStartPos, snapVector(mousePos), 2, RED);
         for (const auto& comp : circuit.components) circuit.drawComponent(*comp);
 
-        for (const auto& pair : circuit.pointToNodeMap) {
-            PointKey pt = pair.first;
-            int nodeId = pair.second;
-            double vVal = (circuit.nodeVoltages.find(nodeId) != circuit.nodeVoltages.end()) ? circuit.nodeVoltages[nodeId] : 0.0;
-            stringstream ss; ss << "N" << nodeId << " (" << fixed << setprecision(2) << vVal << "V)";
-            DrawRectangle(pt.x - 4, pt.y - 18, MeasureText(ss.str().c_str(), 10) + 8, 14, Color{ 255, 255, 255, 200 });
-            DrawText(ss.str().c_str(), pt.x - 2, pt.y - 16, 10, DARKGREEN);
-        }
+        // ---- oscilloscope and node table ----
+        Rectangle scopeBounds = { 850, 450, 700, 400 };
+        circuit.scope.draw(scopeBounds);
+        circuit.scope.drawControls(scopeBounds);
 
-        DrawOscilloscope(circuit, Rectangle{ 900, 530, 360, 170 });
+        DrawNodeTable(circuit, Rectangle{ 250, SCREEN_HEIGHT - 190, 260, 180 });
 
-        DrawRectangle(0, 0, 240, 720, Color{ 30, 34, 42, 255 });
+        // ---- sidebar ----
+        DrawRectangle(0, 0, 240, SCREEN_HEIGHT, Color{ 30, 34, 42, 255 });
         DrawText("LOGIC & ANALOG LAB", 15, 12, 16, RAYWHITE);
         DrawText("Drag from a red/blue pin to wire", 15, 30, 10, GRAY);
 
@@ -364,6 +382,7 @@ int main() {
         BTN("+ XNOR GATE", ToolMode::XNOR_GATE);
         BTN("+ GROUND (0V)", ToolMode::GROUND);
         BTN("PROBE NODE", ToolMode::PROBE);
+        BTN("ROTATE", ToolMode::ROTATE);
         #undef BTN
 
         yPos += 5;
@@ -379,8 +398,6 @@ int main() {
         }
         yPos += 34;
 
-        // Edit-value panel: only shows up for components with an editable value
-        // (resistor, capacitor, inductor, voltage source). Switches/gates/etc. skip it.
         bool editableSelected = selectedComp && isEditableValueType(selectedComp->type);
         if (editableSelected) {
             DrawLine(15, yPos, 225, yPos, GRAY); yPos += 10;
@@ -398,7 +415,6 @@ int main() {
             yPos += 30;
 
             if (isEditingValue) {
-                // Capture typed characters
                 int key = GetCharPressed();
                 while (key > 0) {
                     bool isDigit = (key >= '0' && key <= '9');
@@ -414,7 +430,6 @@ int main() {
                 }
                 if (IsKeyPressed(KEY_ESCAPE)) isEditingValue = false;
 
-                // Apply live so the component updates on the canvas as you type
                 applyEditBuffer(selectedComp, editBuffer);
 
                 Rectangle box{ 15, (float)yPos, 210, 28 };
