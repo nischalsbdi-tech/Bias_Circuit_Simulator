@@ -14,7 +14,7 @@ int main() {
     InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Electronic Circuit Design and Simulation Studio");
     SetTargetFPS(60);
 
-    // Load custom font (e.g., Roboto-Regular.ttf)
+    
   g_font = LoadFont("LiberationSans-Regular.ttf");
     g_fontBold = LoadFont("LiberationSans-Bold.ttf");
     if (g_font.texture.id == 0) g_font = GetFontDefault();
@@ -39,9 +39,13 @@ int main() {
         BeginDrawing();
         ClearBackground(RAYWHITE);
 
-        for (int x = 240; x < SCREEN_WIDTH; x += 20)
-            for (int y = 0; y < SCREEN_HEIGHT; y += 20)
-                DrawPixel(x, y, LIGHTGRAY);
+// Vertical lines
+for (int x = 240; x < SCREEN_WIDTH; x += 20)
+    DrawLine(x, 0, x, SCREEN_HEIGHT, LIGHTGRAY);
+
+// Horizontal lines
+for (int y = 0; y < SCREEN_HEIGHT; y += 20)
+    DrawLine(240, y, SCREEN_WIDTH, y, LIGHTGRAY);
 
         for (size_t i = 0; i < circuit.wires.size(); ++i) {
             if (static_cast<int>(i) == state.selectedWireIdx) {

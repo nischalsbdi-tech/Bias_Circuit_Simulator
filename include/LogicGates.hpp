@@ -2,11 +2,10 @@
 #define LOGIC_GATES_HPP
 
 #include "Component.hpp"
-#include "Utils.hpp"   // for g_font
 #include <string>
 
 using namespace std;
-
+extern Font g_font;
 inline bool evaluateLogicGate(ComponentType type, bool inA, bool inB) {
     switch (type) {
         case ComponentType::AND_GATE:  return inA && inB;
@@ -41,7 +40,7 @@ inline void drawLogicGate(const Component& gate) {
 
     DrawRectangleRec(Rectangle{ gate.pos.x - 20, gate.pos.y - 18, 20, 36 }, LIGHTGRAY);
     DrawCircleSector(Vector2{ gate.pos.x, gate.pos.y }, 18, -90, 90, 16, LIGHTGRAY);
-    DrawRectangleLinesEx(Rectangle{ gate.pos.x - 20, gate.pos.y - 18, 20, 36 }, 2, bodyColor);
+    DrawRectangleLinesEx(Rectangle{ gate.pos.x - 20, gate.pos.y - 18, 20, 36 }, 2, LIGHTGRAY);
 
     if (gate.type == ComponentType::NOT_GATE) {
         DrawLineEx(tA.pos, Vector2{ gate.pos.x - 20, gate.pos.y }, 2, DARKGRAY);
@@ -51,8 +50,7 @@ inline void drawLogicGate(const Component& gate) {
     }
 
     DrawLineEx(Vector2{ gate.pos.x + 20, gate.pos.y }, tC.pos, 2, DARKGRAY);
-    Vector2 pos = { gate.pos.x - 16, gate.pos.y - 6 };
-    DrawTextEx(g_font, getGateLabel(gate.type).c_str(), pos, 10, 1, BLACK);
+    DrawText(getGateLabel(gate.type).c_str(), static_cast<int>(gate.pos.x - 16), static_cast<int>(gate.pos.y - 6), 10, BLACK);
     DrawCircleV(tC.pos, 3, BLUE);
 }
 

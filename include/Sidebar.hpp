@@ -77,7 +77,7 @@ inline void drawValueEditBox(AppState& state, int yPos) {
 // Sidebar drawing
 inline void drawSidebar(Circuit& circuit, AppState& state, int screenHeight) {
     DrawRectangle(0, 0, 240, screenHeight, Color{ 30, 34, 42, 255 });
-    DrawTextEx(g_font, "LOGIC & ANALOG LAB", { 15, 12 }, 16, 1, RAYWHITE);
+    DrawTextEx(g_font, "COMPONETS", { 15, 12 }, 16, 1, RAYWHITE);
     DrawTextEx(g_font, "Drag from a red/blue pin to wire", { 15, 30 }, 10, 1, GRAY);
 
     int yPos = 46;
