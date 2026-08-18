@@ -7,7 +7,7 @@
 int main() {
     const int SCREEN_WIDTH = 1600;
     const int SCREEN_HEIGHT = 900;
-    InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Transient Circuit Simulator - Logic & Analog");
+    InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Electronic Circuit Design and Simulation Studio");
     SetTargetFPS(60);
 
     Circuit circuit;
