@@ -6,16 +6,17 @@
 
 using namespace std;
 
-// Draws voltage/readout text - just a plain draw using the darker, more
-// legible green (VOLT_TEXT_COLOR). Previously this doubled the draw call to
-// fake bold, but that made small text look thick and jumbled - so it's back
-// to a single draw and lets the darker color do the legibility work.
+// Global custom font (loaded in main.cpp)
+extern Font g_font;
+extern Font g_fontBold; 
+
+// Draws voltage/readout text using the custom font and darker green.
 inline void DrawTextBold(const char* text, int x, int y, int fontSize, Color color) {
-    DrawText(text, x, y, fontSize, color);
+    Vector2 pos = { (float)x, (float)y };
+    DrawTextEx(g_font, text, pos, (float)fontSize, 1, color);
 }
 
-// Darker, more legible green used for live voltage readouts (plain GREEN is
-// too light/thin to read comfortably against the canvas or scope background).
+// Darker, more legible green used for live voltage readouts.
 inline const Color VOLT_TEXT_COLOR = Color{ 0, 140, 0, 255 };
 
 inline Vector2 snapVector(Vector2 v, float gridStep = 20.0f) {
@@ -31,8 +32,15 @@ inline bool DrawButton(Rectangle rect, const char* text, bool active = false, Co
     Color color = active ? SKYBLUE : (hovered ? RAYWHITE : baseColor);
     DrawRectangleRec(rect, color);
     DrawRectangleLinesEx(rect, 2, active ? BLUE : DARKGRAY);
-    int textWidth = MeasureText(text, 12);
-    DrawText(text, static_cast<int>(rect.x + (rect.width - textWidth) / 2.0f), static_cast<int>(rect.y + (rect.height - 12) / 2.0f), 12, BLACK);
+
+    // Use custom font for button text, with proper centering
+    float fontSize = 12.0f;
+    Vector2 textSize = MeasureTextEx(g_font, text, fontSize, 1);
+    Vector2 pos = {
+        rect.x + (rect.width - textSize.x) / 2.0f,
+        rect.y + (rect.height - textSize.y) / 2.0f
+    };
+    DrawTextEx(g_font, text, pos, fontSize, 1, BLACK);
     return hovered && IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
 }
 

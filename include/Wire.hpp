@@ -5,7 +5,7 @@
 #include <cmath>
 
 using namespace std;
-
+extern Font g_font;
 struct Wire {
     Vector2 startPos;
     Vector2 endPos;

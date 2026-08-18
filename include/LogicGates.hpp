@@ -2,6 +2,7 @@
 #define LOGIC_GATES_HPP
 
 #include "Component.hpp"
+#include "Utils.hpp"   // for g_font
 #include <string>
 
 using namespace std;
@@ -50,7 +51,8 @@ inline void drawLogicGate(const Component& gate) {
     }
 
     DrawLineEx(Vector2{ gate.pos.x + 20, gate.pos.y }, tC.pos, 2, DARKGRAY);
-    DrawText(getGateLabel(gate.type).c_str(), static_cast<int>(gate.pos.x - 16), static_cast<int>(gate.pos.y - 6), 10, BLACK);
+    Vector2 pos = { gate.pos.x - 16, gate.pos.y - 6 };
+    DrawTextEx(g_font, getGateLabel(gate.type).c_str(), pos, 10, 1, BLACK);
     DrawCircleV(tC.pos, 3, BLUE);
 }
 

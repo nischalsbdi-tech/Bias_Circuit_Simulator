@@ -13,12 +13,11 @@
 
 using namespace std;
 
-// Bottom-left panel listing every node's solved voltage. Only meaningful
-// (and only drawn by the caller) while the simulation is running.
+// Node table (uses custom font)
 inline void DrawNodeTable(const Circuit& circuit, Rectangle bounds) {
     DrawRectangleRec(bounds, Color{ 20, 25, 35, 220 });
     DrawRectangleLinesEx(bounds, 2, Color{ 100, 200, 255, 200 });
-    DrawText("NODE VOLTAGES", static_cast<int>(bounds.x + 10), static_cast<int>(bounds.y + 6), 12, LIGHTGRAY);
+    DrawTextEx(g_font, "NODE VOLTAGES", { bounds.x + 10, bounds.y + 6 }, 12, 1, LIGHTGRAY);
 
     vector<pair<int, double>> nodes;
     for (const auto& kv : circuit.nodeVoltages) nodes.push_back(kv);
@@ -31,18 +30,18 @@ inline void DrawNodeTable(const Circuit& circuit, Rectangle bounds) {
         if (displayed >= maxRows) break;
         stringstream ss;
         ss << "N" << id << " : " << fixed << setprecision(3) << v << " V";
-        DrawText(ss.str().c_str(),
-                 static_cast<int>(bounds.x + 12),
-                 static_cast<int>(bounds.y + yOffset),
-                 11, (id == 0) ? ORANGE : RAYWHITE);
+        Vector2 pos = { bounds.x + 12, bounds.y + yOffset };
+        Color col = (id == 0) ? ORANGE : RAYWHITE;
+        DrawTextEx(g_font, ss.str().c_str(), pos, 11, 1, col);
         yOffset += rowHeight; displayed++;
     }
     if (static_cast<int>(nodes.size()) > maxRows) {
-        DrawText("...", static_cast<int>(bounds.x + 12), static_cast<int>(bounds.y + yOffset), 11, GRAY);
+        Vector2 pos = { bounds.x + 12, bounds.y + yOffset };
+        DrawTextEx(g_font, "...", pos, 11, 1, GRAY);
     }
 }
 
-// Handles typing/backspace/enter/escape while a component's value is being edited.
+// Value editing helpers
 inline void handleValueEditing(AppState& state) {
     int key = GetCharPressed();
     while (key > 0) {
@@ -68,18 +67,18 @@ inline void drawValueEditBox(AppState& state, int yPos) {
     DrawRectangleLinesEx(box, 2, BLUE);
     bool cursorOn = (static_cast<int>(GetTime() * 2.0) % 2) == 0;
     string display = state.editBuffer + (cursorOn ? "_" : "");
-    DrawText(display.c_str(), static_cast<int>(box.x + 8), static_cast<int>(box.y + 7), 14, BLACK);
+    Vector2 pos = { box.x + 8, box.y + 7 };
+    DrawTextEx(g_font, display.c_str(), pos, 14, 1, BLACK);
     string unit = editUnitSuffix(state.selectedComp->type);
-    int uw = MeasureText(unit.c_str(), 12);
-    DrawText(unit.c_str(), static_cast<int>(box.x + box.width - uw - 8), static_cast<int>(box.y + 9), 12, DARKGRAY);
+    Vector2 unitPos = { box.x + box.width - 8 - MeasureTextEx(g_font, unit.c_str(), 12, 1).x, box.y + 9 };
+    DrawTextEx(g_font, unit.c_str(), unitPos, 12, 1, DARKGRAY);
 }
 
-// Draws the whole left-hand tool sidebar: part buttons, oscilloscope toggle,
-// run/pause, clear, and (when applicable) the value editor for the selected part.
+// Sidebar drawing
 inline void drawSidebar(Circuit& circuit, AppState& state, int screenHeight) {
     DrawRectangle(0, 0, 240, screenHeight, Color{ 30, 34, 42, 255 });
-    DrawText("LOGIC & ANALOG LAB", 15, 12, 16, RAYWHITE);
-    DrawText("Drag from a red/blue pin to wire", 15, 30, 10, GRAY);
+    DrawTextEx(g_font, "LOGIC & ANALOG LAB", { 15, 12 }, 16, 1, RAYWHITE);
+    DrawTextEx(g_font, "Drag from a red/blue pin to wire", { 15, 30 }, 10, 1, GRAY);
 
     int yPos = 46;
     #define BTN(lbl, mode) if (DrawButton(Rectangle{ 15, (float)yPos, 210, 22 }, lbl, state.currentTool == mode)) { state.currentTool = mode; state.selectedWireIdx = -1; state.isEditingValue = false; } yPos += 25;
@@ -153,7 +152,8 @@ inline void drawSidebar(Circuit& circuit, AppState& state, int screenHeight) {
     } else {
         stringstream ss;
         ss << "Value: " << valueToEditString(state.selectedComp) << " " << editUnitSuffix(state.selectedComp->type);
-        DrawText(ss.str().c_str(), 15, yPos, 12, RAYWHITE);
+        Vector2 pos = { 15, (float)yPos };
+        DrawTextEx(g_font, ss.str().c_str(), pos, 12, 1, RAYWHITE);
     }
 }
 

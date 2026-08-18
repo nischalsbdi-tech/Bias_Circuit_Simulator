@@ -16,6 +16,9 @@
 
 using namespace std;
 
+// Global custom font (loaded in main.cpp)
+extern Font g_font;
+
 class DisjointSet {
 public:
     map<PointKey, PointKey> parent;
@@ -89,36 +92,41 @@ public:
             DrawRectangleRec(rect, LIGHTGRAY);
             DrawRectangleLinesEx(rect, 2, bodyColor);
             stringstream ss; ss << static_cast<int>(comp.value) << " Ohm";
-            DrawText(ss.str().c_str(), static_cast<int>(comp.pos.x - 22), static_cast<int>(comp.pos.y + 16), 11, DARKBLUE);
+            Vector2 pos = { comp.pos.x - 22, comp.pos.y + 16 };
+            DrawTextEx(g_font, ss.str().c_str(), pos, 11, 1, DARKBLUE);
         } else if (comp.type == ComponentType::CAPACITOR) {
             DrawLineEx(tA.pos, Vector2{ comp.pos.x - 6, comp.pos.y }, 2, DARKGRAY);
             DrawLineEx(Vector2{ comp.pos.x + 6, comp.pos.y }, tB.pos, 2, DARKGRAY);
             DrawLineEx(Vector2{ comp.pos.x - 6, comp.pos.y - 18 }, Vector2{ comp.pos.x - 6, comp.pos.y + 18 }, 4, bodyColor);
             DrawLineEx(Vector2{ comp.pos.x + 6, comp.pos.y - 18 }, Vector2{ comp.pos.x + 6, comp.pos.y + 18 }, 4, bodyColor);
             stringstream ss; ss << static_cast<int>(comp.value * 1e6) << " uF";
-            DrawText(ss.str().c_str(), static_cast<int>(comp.pos.x + 15), static_cast<int>(comp.pos.y - 6), 11, DARKBLUE);
+            Vector2 pos = { comp.pos.x + 15, comp.pos.y - 6 };
+            DrawTextEx(g_font, ss.str().c_str(), pos, 11, 1, DARKBLUE);
         } else if (comp.type == ComponentType::INDUCTOR) {
             DrawLineEx(tA.pos, tB.pos, 2, DARKGRAY);
             for (int i = -2; i <= 2; ++i) {
                 DrawCircleLines(static_cast<int>(comp.pos.x + i * 10.0f), static_cast<int>(comp.pos.y), 7, bodyColor);
             }
             stringstream ss; ss << static_cast<int>(comp.value * 1e3) << " mH";
-            DrawText(ss.str().c_str(), static_cast<int>(comp.pos.x + 15), static_cast<int>(comp.pos.y - 6), 11, DARKBLUE);
+            Vector2 pos = { comp.pos.x + 15, comp.pos.y - 6 };
+            DrawTextEx(g_font, ss.str().c_str(), pos, 11, 1, DARKBLUE);
         } else if (comp.type == ComponentType::VOLTAGE_SOURCE) {
             DrawCircleV(comp.pos, 22, LIGHTGRAY);
             DrawCircleLines(static_cast<int>(comp.pos.x), static_cast<int>(comp.pos.y), 22, bodyColor);
             DrawLineEx(tA.pos, Vector2{ comp.pos.x - 22, comp.pos.y }, 2, DARKGRAY);
             DrawLineEx(Vector2{ comp.pos.x + 22, comp.pos.y }, tB.pos, 2, DARKGRAY);
-            DrawText("+", static_cast<int>(comp.pos.x - 14), static_cast<int>(comp.pos.y - 8), 16, RED);
-            DrawText("-", static_cast<int>(comp.pos.x + 6), static_cast<int>(comp.pos.y - 8), 16, BLUE);
+            DrawTextEx(g_font, "+", { comp.pos.x - 14, comp.pos.y - 8 }, 16, 1, RED);
+            DrawTextEx(g_font, "-", { comp.pos.x + 6, comp.pos.y - 8 }, 16, 1, BLUE);
             stringstream ss; ss << comp.value << " V";
-            DrawText(ss.str().c_str(), static_cast<int>(comp.pos.x + 25), static_cast<int>(comp.pos.y - 6), 11, DARKGREEN);
+            Vector2 pos = { comp.pos.x + 25, comp.pos.y - 6 };
+            DrawTextEx(g_font, ss.str().c_str(), pos, 11, 1, DARKGREEN);
         } else if (comp.type == ComponentType::GROUND) {
             DrawLineEx(Vector2{ comp.pos.x, comp.pos.y - 20 }, comp.pos, 2, DARKGRAY);
             DrawLineEx(Vector2{ comp.pos.x - 15, comp.pos.y }, Vector2{ comp.pos.x + 15, comp.pos.y }, 3, bodyColor);
             DrawLineEx(Vector2{ comp.pos.x - 10, comp.pos.y + 5 }, Vector2{ comp.pos.x + 10, comp.pos.y + 5 }, 2, bodyColor);
             DrawLineEx(Vector2{ comp.pos.x - 5, comp.pos.y + 10 }, Vector2{ comp.pos.x + 5, comp.pos.y + 10 }, 1, bodyColor);
-            DrawText("GND", static_cast<int>(comp.pos.x + 18), static_cast<int>(comp.pos.y - 10), 11, DARKGRAY);
+            Vector2 pos = { comp.pos.x + 18, comp.pos.y - 10 };
+            DrawTextEx(g_font, "GND", pos, 11, 1, DARKGRAY);
         } else if (comp.type == ComponentType::LED) {
             DrawLineEx(tA.pos, Vector2{ comp.pos.x - 12, comp.pos.y }, 2, DARKGRAY);
             DrawLineEx(Vector2{ comp.pos.x + 12, comp.pos.y }, tB.pos, 2, DARKGRAY);
@@ -126,7 +134,8 @@ public:
             if (isLit) DrawCircleV(comp.pos, 22, Color{ 255, 50, 50, 100 });
             DrawTriangle(Vector2{ comp.pos.x - 10, comp.pos.y - 12 }, Vector2{ comp.pos.x - 10, comp.pos.y + 12 }, Vector2{ comp.pos.x + 10, comp.pos.y }, isLit ? RED : DARKGRAY);
             DrawLineEx(Vector2{ comp.pos.x + 10, comp.pos.y - 12 }, Vector2{ comp.pos.x + 10, comp.pos.y + 12 }, 3, isLit ? RED : bodyColor);
-            DrawText("LED", static_cast<int>(comp.pos.x - 10), static_cast<int>(comp.pos.y + 16), 10, RED);
+            Vector2 pos = { comp.pos.x - 10, comp.pos.y + 16 };
+            DrawTextEx(g_font, "LED", pos, 10, 1, RED);
         } else if (comp.type == ComponentType::SWITCH) {
             Vector2 pivot = Vector2{ comp.pos.x - 15, comp.pos.y };
             Vector2 contact = Vector2{ comp.pos.x + 15, comp.pos.y };
@@ -140,7 +149,10 @@ public:
                 Vector2 leverEnd = Vector2{ comp.pos.x + 12, comp.pos.y - 16 };
                 DrawLineEx(pivot, leverEnd, 3, MAROON);
             }
-            DrawText(comp.switchOn ? "CLOSED" : "OPEN", static_cast<int>(comp.pos.x - 22), static_cast<int>(comp.pos.y + 16), 11, comp.switchOn ? DARKGREEN : MAROON);
+            const char* label = comp.switchOn ? "CLOSED" : "OPEN";
+            Color lblColor = comp.switchOn ? DARKGREEN : MAROON;
+            Vector2 pos = { comp.pos.x - 22, comp.pos.y + 16 };
+            DrawTextEx(g_font, label, pos, 11, 1, lblColor);
         } else if (comp.type == ComponentType::TWO_WAY_SWITCH) {
             Terminal tC = comp.getTerminalC();
             Vector2 pivot = Vector2{ comp.pos.x - 15, comp.pos.y };
@@ -151,23 +163,26 @@ public:
             DrawLineEx(pivot, activeContact, 3, DARKGREEN);
             DrawCircleV(pivot, 3, bodyColor);
             DrawCircleV(tC.pos, 4, BLUE);
-            DrawText(comp.switchPos ? "POS: B" : "POS: A", static_cast<int>(comp.pos.x - 20), static_cast<int>(comp.pos.y + 22), 11, DARKGREEN);
+            const char* label = comp.switchPos ? "POS: B" : "POS: A";
+            Vector2 pos = { comp.pos.x - 20, comp.pos.y + 22 };
+            DrawTextEx(g_font, label, pos, 11, 1, DARKGREEN);
         } else if (comp.type == ComponentType::AMMETER) {
             DrawLineEx(tA.pos, Vector2{ comp.pos.x - 18, comp.pos.y }, 2, DARKGRAY);
             DrawLineEx(Vector2{ comp.pos.x + 18, comp.pos.y }, tB.pos, 2, DARKGRAY);
             DrawCircleV(comp.pos, 18, LIGHTGRAY);
             DrawCircleLines(static_cast<int>(comp.pos.x), static_cast<int>(comp.pos.y), 18, bodyColor);
-            DrawText("A", static_cast<int>(comp.pos.x - 4), static_cast<int>(comp.pos.y - 7), 14, DARKBLUE);
+            DrawTextEx(g_font, "A", { comp.pos.x - 4, comp.pos.y - 7 }, 14, 1, DARKBLUE);
             stringstream ss;
             if (abs(comp.current) < 1.0) ss << fixed << setprecision(1) << (comp.current * 1000.0) << " mA";
             else ss << fixed << setprecision(2) << comp.current << " A";
-            DrawText(ss.str().c_str(), static_cast<int>(comp.pos.x - 20), static_cast<int>(comp.pos.y + 22), 11, PURPLE);
+            Vector2 pos = { comp.pos.x - 20, comp.pos.y + 22 };
+            DrawTextEx(g_font, ss.str().c_str(), pos, 11, 1, PURPLE);
         } else if (comp.type == ComponentType::VOLTMETER) {
             DrawLineEx(tA.pos, Vector2{ comp.pos.x - 18, comp.pos.y }, 2, DARKGRAY);
             DrawLineEx(Vector2{ comp.pos.x + 18, comp.pos.y }, tB.pos, 2, DARKGRAY);
             DrawCircleV(comp.pos, 18, LIGHTGRAY);
             DrawCircleLines(static_cast<int>(comp.pos.x), static_cast<int>(comp.pos.y), 18, bodyColor);
-            DrawText("V", static_cast<int>(comp.pos.x - 4), static_cast<int>(comp.pos.y - 7), 14, DARKGREEN);
+            DrawTextEx(g_font, "V", { comp.pos.x - 4, comp.pos.y - 7 }, 14, 1, DARKGREEN);
 
             auto itA = pointToNodeMap.find(makePointKey(tA.pos));
             auto itB = pointToNodeMap.find(makePointKey(tB.pos));
@@ -178,7 +193,9 @@ public:
             double vB = (nBId >= 0) ? vIt(nBId) : 0.0;
 
             stringstream ss; ss << fixed << setprecision(2) << (vA - vB) << " V";
-            DrawTextBold(ss.str().c_str(), static_cast<int>(comp.pos.x - 20), static_cast<int>(comp.pos.y + 22), 11, VOLT_TEXT_COLOR);
+            Vector2 pos = { comp.pos.x - 20, comp.pos.y + 22 };
+            // DrawTextBold will use the global font because we'll update Utils.hpp accordingly.
+            DrawTextBold(ss.str().c_str(), static_cast<int>(pos.x), static_cast<int>(pos.y), 11, VOLT_TEXT_COLOR);
         }
 
         // ---- Particle (unchanged) ----
@@ -264,10 +281,12 @@ public:
                 auto it = nodeVoltages.find(id);
                 double v = (it != nodeVoltages.end()) ? it->second : 0.0;
                 ss << " " << fixed << setprecision(2) << v << "V";
-                DrawTextBold(ss.str().c_str(), pk.x + 4, pk.y - 14, 11, VOLT_TEXT_COLOR);
+                Vector2 pos = { (float)(pk.x + 4), (float)(pk.y - 14) };
+                DrawTextEx(g_font, ss.str().c_str(), pos, 11, 1, VOLT_TEXT_COLOR);
                 continue;
             }
-            DrawText(ss.str().c_str(), pk.x + 4, pk.y - 14, 10, col);
+            Vector2 pos = { (float)(pk.x + 4), (float)(pk.y - 14) };
+            DrawTextEx(g_font, ss.str().c_str(), pos, 10, 1, col);
         }
     }
 

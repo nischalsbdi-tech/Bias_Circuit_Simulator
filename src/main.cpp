@@ -4,11 +4,21 @@
 #include "InputHandler.hpp"
 #include "Sidebar.hpp"
 
+// Define the global font (used by all drawing functions)
+Font g_font;
+Font g_fontBold;
+
 int main() {
     const int SCREEN_WIDTH = 1600;
     const int SCREEN_HEIGHT = 900;
     InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Electronic Circuit Design and Simulation Studio");
     SetTargetFPS(60);
+
+    // Load custom font (e.g., Roboto-Regular.ttf)
+  g_font = LoadFont("LiberationSans-Regular.ttf");
+    g_fontBold = LoadFont("LiberationSans-Bold.ttf");
+    if (g_font.texture.id == 0) g_font = GetFontDefault();
+    if (g_fontBold.texture.id == 0) g_fontBold = g_font;
 
     Circuit circuit;
     AppState state;
@@ -46,13 +56,9 @@ int main() {
         if (state.isWiring) DrawLineEx(state.wireStartPos, snapVector(GetMousePosition()), 2, RED);
         for (const auto& comp : circuit.components) circuit.drawComponent(*comp);
 
-        // on-canvas node labels: just "N1" while building, "N1 5.00V" (bold green) while running
         circuit.drawNodeLabels(circuit.isRunning);
-
-        // minimal, draggable oscilloscope - only appears when toggled on from the sidebar
         circuit.scope.draw();
 
-        // node voltage table - only meaningful once the simulation is running
         if (circuit.isRunning) {
             DrawNodeTable(circuit, Rectangle{ 250, SCREEN_HEIGHT - 190, 260, 180 });
         }
@@ -60,6 +66,11 @@ int main() {
         drawSidebar(circuit, state, SCREEN_HEIGHT);
 
         EndDrawing();
+    }
+
+    // Unload font if it was loaded
+    if (g_font.texture.id != 0 && g_font.texture.id != GetFontDefault().texture.id) {
+        UnloadFont(g_font);
     }
 
     CloseWindow();

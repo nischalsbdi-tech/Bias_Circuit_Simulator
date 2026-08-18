@@ -2,14 +2,14 @@
 #define OSCILLOSCOPE_HPP
 
 #include "raylib.h"
-#include "Utils.hpp"
+#include "Utils.hpp"   // for g_font, VOLT_TEXT_COLOR
 #include <vector>
 #include <map>
 #include <string>
 #include <sstream>
 #include <iomanip>
 
-// ---------- Ring Buffer (fixed capacity) ----------
+// ---------- Ring Buffer ----------
 template<typename T>
 class RingBuffer {
     std::vector<T> data;
@@ -27,7 +27,6 @@ public:
     size_t size() const { return count; }
     bool empty() const { return count == 0; }
 
-    // operator[]: 0 = oldest, size()-1 = newest
     T operator[](size_t idx) const {
         return data[(head - count + idx + data.size()) % data.size()];
     }
@@ -40,16 +39,13 @@ public:
     void clear() { count = 0; head = 0; }
 };
 
-// ---------- Minimalistic single-node, draggable Oscilloscope ----------
-// Only ever tracks ONE node at a time. It costs nothing and draws nowhere
-// unless "visible" is turned on from the sidebar toggle. Drag it by its
-// title bar to reposition it anywhere on the canvas.
+// ---------- Oscilloscope ----------
 class Oscilloscope {
 public:
-    bool visible = false;      // toggled on/off from the sidebar
-    int nodeId = -1;           // -1 = nothing probed yet
+    bool visible = false;
+    int nodeId = -1;
     RingBuffer<float> history{400};
-    float voltsPerDiv = 5.0f;  // fixed vertical scale (+-2 divs shown)
+    float voltsPerDiv = 5.0f;
     Rectangle bounds = { 900, 480, 480, 200 };
 
 private:
@@ -74,7 +70,6 @@ public:
         if (it != nodeVoltages.end()) history.push(static_cast<float>(it->second));
     }
 
-    // Call once per frame (before draw) so dragging the title bar works.
     void handleDrag() {
         if (!visible) return;
         Vector2 m = GetMousePosition();
@@ -91,17 +86,17 @@ public:
         if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) dragging = false;
     }
 
-    // Draws the panel. Does nothing if not visible - it simply isn't on the canvas.
     void draw() const {
         if (!visible) return;
 
         DrawRectangleRec(bounds, Color{ 12, 16, 20, 235 });
         DrawRectangleLinesEx(bounds, 1, Color{ 90, 200, 120, 220 });
 
-        // title bar (drag handle)
+        // title bar
         Rectangle titleBar = { bounds.x, bounds.y, bounds.width, TITLE_H };
         DrawRectangleRec(titleBar, Color{ 30, 40, 45, 255 });
-        DrawText("OSCILLOSCOPE  (drag here to move)", (int)bounds.x + 6, (int)bounds.y + 3, 10, LIGHTGRAY);
+        Vector2 titlePos = { bounds.x + 6, bounds.y + 3 };
+        DrawTextEx(g_font, "OSCILLOSCOPE  (drag here to move)", titlePos, 10, 1, LIGHTGRAY);
 
         float left = bounds.x + 4, right = bounds.x + bounds.width - 4;
         float top = bounds.y + TITLE_H + 20, bottom = bounds.y + bounds.height - 6;
@@ -109,21 +104,23 @@ public:
         float midY = top + h / 2.0f;
 
         if (nodeId < 0) {
-            DrawText("Use PROBE to pick a node", (int)bounds.x + 10, (int)midY - 5, 10, GRAY);
+            Vector2 pos = { bounds.x + 10, midY - 5 };
+            DrawTextEx(g_font, "Use PROBE to pick a node", pos, 10, 1, GRAY);
             return;
         }
 
-        // single centre gridline - minimalistic, no ruled grid
+        // centre gridline
         DrawLine((int)left, (int)midY, (int)right, (int)midY, Color{ 60, 90, 90, 140 });
 
-        // label: node id + latest reading, bold dark-green for legibility
+        // label: node id + latest reading
         std::string label = "N" + std::to_string(nodeId);
         if (!history.empty()) {
             std::ostringstream ss;
             ss << std::fixed << std::setprecision(2) << history.back() << "V";
             label += "  " + ss.str();
         }
-        DrawTextBold(label.c_str(), (int)bounds.x + 8, (int)bounds.y + TITLE_H + 4, 12, VOLT_TEXT_COLOR);
+        Vector2 labelPos = { bounds.x + 8, bounds.y + TITLE_H + 4 };
+        DrawTextEx(g_font, label.c_str(), labelPos, 12, 1, VOLT_TEXT_COLOR);
 
         if (history.size() < 2) return;
 
